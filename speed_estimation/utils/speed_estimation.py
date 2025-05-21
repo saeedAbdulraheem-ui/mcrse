@@ -98,6 +98,7 @@ class Car:
         frame_start: int,
         frame_end: int,
         direction: Direction = Direction.UNDEFINED,
+        speed: float = 0.0,
     ) -> None:
         """Create an instance of Car.
 
@@ -117,6 +118,7 @@ class Car:
         self.frame_start = frame_start
         self.frame_end = frame_end
         self.direction = direction
+        self.speed = speed
 
 
 def get_intersection(line_a: Line, line_b: Line) -> Optional[Point]:

@@ -84,7 +84,7 @@ def run(
     fps: int = 0,
     max_frames: int = 0,
     custom_object_detection: bool = False,
-    enable_visual: bool = False,
+    enable_visual: bool = True,
 ) -> str:
     """Run the full speed estimation pipeline.
 
@@ -177,6 +177,10 @@ def run(
             center_x = int(frame.shape[1] / 2)
             center_y = int(frame.shape[0] / 2)
             geo_model.set_normalization_axes(center_x, center_y)
+
+        # TODO(SAID): run for only 300 frames, testing
+        if frame_count == 300:
+            break
 
         if not ret:
             break
@@ -295,9 +299,18 @@ def run(
             # track cars
             ############################
             for object_id, tracking_box in tracking_objects.items():
+                if object_id in tracked_cars:
+                    tracked_cars[object_id].tracked_boxes.append(tracking_box)
+                    tracked_cars[object_id].frames_seen += 1
+                    tracked_cars[object_id].frame_end += 1
+                else:
+                    tracked_cars[object_id] = Car(
+                        [tracking_box], 1, frame_count, frame_count, 
+                        Direction.UNDEFINED, 0.0
+                    )
                 cv2.putText(
                     frame,
-                    f"ID:{object_id}",
+                    f"ID:{object_id} V: {tracked_cars[object_id].speed}",
                     (
                         tracking_box.x_coord + tracking_box.width + 5,
                         tracking_box.y_coord + tracking_box.height,
@@ -307,14 +320,6 @@ def run(
                     (255, 255, 255),
                     2,
                 )
-                if object_id in tracked_cars:
-                    tracked_cars[object_id].tracked_boxes.append(tracking_box)
-                    tracked_cars[object_id].frames_seen += 1
-                    tracked_cars[object_id].frame_end += 1
-                else:
-                    tracked_cars[object_id] = Car(
-                        [tracking_box], 1, frame_count, frame_count
-                    )
 
             ############################
             # speed estimation
@@ -366,7 +371,9 @@ def run(
                                 total_speed_meta_appr_away += (
                                     AVG_FRAME_COUNT / int(car.frames_seen)
                                 ) * SPEED_LIMIT
-
+                            # Write car ID and estimated speed on the car
+                            speed_kmh = round((meters_moved / (car.frames_seen / fps)) * 3.6, 2)
+                            car.speed = speed_kmh
                     else:
                         # car is too old, drop from tracked_cars
                         ids_to_drop.append(car_id)
@@ -389,6 +396,15 @@ def run(
 
                 if car_count_away > 0:
                     avg_speed = round((total_speed_away / car_count_away) * 3.6, 2)
+                    cv2.putText(
+                        frame,
+                        f"Avg Speed: {avg_speed} km/h",
+                        (7, 130),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        1,
+                        text_color,
+                        2,
+                    )
                     print(f"Average speed away: {avg_speed} km/h")
                     print(
                         f"Average META speed away: "
@@ -415,11 +431,11 @@ def run(
             frame, f"FPS: {fps}", (7, 100), cv2.FONT_HERSHEY_SIMPLEX, 1, text_color, 2
         )
 
-        if enable_visual:
-            cv2.imshow("farsec", frame)
-            cv2.waitKey(1000)
-        else:
-            cv2.imwrite("frames_detected/frame_after_detection.jpg", frame)
+        # if enable_visual:
+        #     cv2.imshow("farsec", frame)
+        #     cv2.waitKey(1000)
+        # else:
+        cv2.imwrite("frames_detected/frame_after_detection.jpg", frame)
 
         if frame_count % 500 == 0:
             print(

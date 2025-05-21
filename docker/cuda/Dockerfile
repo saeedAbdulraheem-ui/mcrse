@@ -1,4 +1,4 @@
-FROM nvidia/cuda:11.4.1-devel-ubuntu20.04
+FROM nvidia/cuda:12.8.1-devel-ubuntu20.04
 
 ARG DEBIAN_FRONTEND=noninteractive
 ARG OPENCV_VERSION=4.5.3
@@ -76,3 +76,5 @@ RUN cd /opt/ &&\
 WORKDIR /storage
 COPY ../requirements.txt /storage/requirements.txt
 RUN pip install -r requirements.txt
+
+RUN apt update && apt-get install libcublas-12-0
