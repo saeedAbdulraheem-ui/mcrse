@@ -61,6 +61,7 @@ class TrackingBox:
         width: int,
         height: int,
         frame_count: int,
+        class_id: int = 0,
     ) -> None:
         """Create an instance of TrackingBox.
 
@@ -78,6 +79,8 @@ class TrackingBox:
             The height of the TrackingBox (y-direction)
         @param frame_count:
             The count of the frame in which the TrackingBox was detected.
+        @param class_id:
+            The class id of the detected object.
         """
         self.center_x = center_x
         self.center_y = center_y
@@ -86,7 +89,8 @@ class TrackingBox:
         self.width = width
         self.height = height
         self.frame_count = frame_count
-
+        self.class_id = class_id
+        
 
 class Car:
     """This class represents a car with all the relevant information for a speed estimation."""

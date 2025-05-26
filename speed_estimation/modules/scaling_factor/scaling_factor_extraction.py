@@ -8,7 +8,15 @@ from scipy.linalg import norm
 from scipy.spatial import distance
 from utils.speed_estimation import Line, Point, TrackingBox, get_intersection
 
-
+# Mapping from YOLO class IDs to average object lengths in meters
+# Mapping from YOLOv4 class IDs to average horizontal object lengths in meters
+# (indices based on YOLOv4: 0=person, 1=bicycle, 2=car, 3=motorbike)
+YOLO_CLASS_ID_TO_AVG_LENGTH = {
+    0: 0.5,   # person (average horizontal width)
+    1: 1.7,   # bicycle (horizontal length)
+    2: 6.0,   # car (horizontal length)
+    3: 2.1,   # motorbike (horizontal length)
+}
 @dataclass
 class CameraPoint:
     """A Camera Point in the frame.
@@ -371,6 +379,10 @@ def get_ground_truth_events(
 
         # extract ground truth value for each tracking box
         for box in tracking_boxes[object_id]:
+            object_class = box.class_id
+            if object_class not in YOLO_CLASS_ID_TO_AVG_LENGTH:
+                continue
+            average_object_length = YOLO_CLASS_ID_TO_AVG_LENGTH[object_class]
             # check each of the four lines, spanned by the bounding box rectangle
             upper_line = Line(
                 Point(box.x_coord, box.y_coord),
@@ -410,7 +422,7 @@ def get_ground_truth_events(
                             int(intersect2.x_coord),
                             int(intersect2.y_coord),
                         ),
-                        6,
+                        average_object_length,
                     )
                 )
 

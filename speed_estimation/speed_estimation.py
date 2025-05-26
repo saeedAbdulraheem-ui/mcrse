@@ -65,7 +65,10 @@ config.read("config.ini")
 
 
 MAX_TRACKING_MATCH_DISTANCE = config.getint("tracker", "max_match_distance")
+PED_CLASS_ID = config.getint("tracker", "ped_class_id")
+CYCLE_CLASS_ID = config.getint("tracker", "cycle_class_id")
 CAR_CLASS_ID = config.getint("tracker", "car_class_id")
+MOTORBIKE_CLASS_ID = config.getint("tracker", "motorbike_class_id")
 NUM_TRACKED_CARS = config.getint("calibration", "num_tracked_cars")
 NUM_GT_EVENTS = config.getint("calibration", "num_gt_events")
 AVG_FRAME_COUNT = config.getfloat("analyzer", "avg_frame_count")
@@ -171,6 +174,13 @@ def run(
         # load frame, shake detection and object detection
         ############################
         ret, frame = input_video.read()
+        if (not ret) and (not is_calibrated):
+            # If video end reached, restart from beginning
+            input_video.set(cv2.CAP_PROP_POS_FRAMES, 0)
+            frame_count = 0
+            ret, frame = input_video.read()
+            if not ret:
+                break
 
         if frame_count == 0:
             # set normalization axes once at beginning
@@ -179,8 +189,8 @@ def run(
             geo_model.set_normalization_axes(center_x, center_y)
 
         # TODO(SAID): run for only 300 frames, testing
-        if frame_count == 300:
-            break
+        # if frame_count == 300:
+        #     break
 
         if not ret:
             break
@@ -204,22 +214,29 @@ def run(
             (class_ids, scores, boxes) = object_detection.detect(frame)
 
             boxes = [
-                boxes[i]
+                [boxes[i],
+                class_ids[i]]
                 for i, class_id in enumerate(class_ids)
-                if class_id == CAR_CLASS_ID
+                if (
+                    class_id == CAR_CLASS_ID
+                    or class_id == PED_CLASS_ID
+                    or class_id == CYCLE_CLASS_ID
+                    or class_id == MOTORBIKE_CLASS_ID
+                )
                 and scores[i] >= OBJECT_DETECTION_MIN_CONFIDENCE_SCORE
             ]
 
         # collect tracking boxes
         tracking_boxes_cur_frame: List[TrackingBox] = []
         for box in boxes:
-            (x_coord, y_coord, width, height) = box.astype(int)
+            (x_coord, y_coord, width, height) = box[0].astype(int)
             center_x = int((x_coord + x_coord + width) / 2)
             center_y = int((y_coord + y_coord + height) / 2)
+            class_id = int(box[1])
 
             tracking_boxes_cur_frame.append(
                 TrackingBox(
-                    center_x, center_y, x_coord, y_coord, width, height, frame_count
+                    center_x, center_y, x_coord, y_coord, width, height, frame_count, class_id
                 )
             )
 
@@ -290,6 +307,10 @@ def run(
                     progress_bar.close()
                     torch.cuda.empty_cache()
                     object_detection = ObjectDetectionYoloV4()
+                    # todo:make this more robust, resets video when calibration is done
+                    input_video.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                    frame_count = 0
+                    continue
 
             progress_bar.update(len(tracked_boxes) - progress_bar.n)
             for object_id, tracking_box in tracking_objects.items():
@@ -324,7 +345,7 @@ def run(
             ############################
             # speed estimation
             ############################
-            if frame_count >= fps and frame_count % sliding_window == 0:
+            if frame_count >= fps:# and frame_count % sliding_window == 0:
                 # every x seconds
                 car_count_towards = 0
                 car_count_away = 0
@@ -352,8 +373,8 @@ def run(
                                     car_last_box.center_y,
                                 ),
                             )
-                            if meters_moved <= 6:
-                                continue
+                            # if meters_moved <= 6:
+                            #     continue
 
                             if car.direction == Direction.TOWARDS:
                                 car_count_towards += 1
@@ -373,6 +394,7 @@ def run(
                                 ) * SPEED_LIMIT
                             # Write car ID and estimated speed on the car
                             speed_kmh = round((meters_moved / (car.frames_seen / fps)) * 3.6, 2)
+                            # print(f"obj ID {car_id}, speed {speed_kmh} km/h")
                             car.speed = speed_kmh
                     else:
                         # car is too old, drop from tracked_cars
@@ -385,11 +407,11 @@ def run(
                     avg_speed = round(
                         (total_speed_towards / car_count_towards) * 3.6, 2
                     )
-                    print(f"Average speed towards: {avg_speed} km/h")
-                    print(
-                        f"Average META speed towards: "
-                        f"{(total_speed_meta_appr_towards / car_count_towards)} km/h"
-                    )
+                    # print(f"Average speed towards: {avg_speed} km/h")
+                    # print(
+                    #     f"Average META speed towards: "
+                    #     f"{(total_speed_meta_appr_towards / car_count_towards)} km/h"
+                    # )
                     logging.info(
                         json.dumps(dict(frameId=frame_count, avgSpeedTowards=avg_speed))
                     )
@@ -405,11 +427,11 @@ def run(
                         text_color,
                         2,
                     )
-                    print(f"Average speed away: {avg_speed} km/h")
-                    print(
-                        f"Average META speed away: "
-                        f"{(total_speed_meta_appr_away / car_count_away)} km/h"
-                    )
+                    # print(f"Average speed away: {avg_speed} km/h")
+                    # print(
+                    #     f"Average META speed away: "
+                    #     f"{(total_speed_meta_appr_away / car_count_away)} km/h"
+                    # )
                     logging.info(
                         json.dumps(dict(frameId=frame_count, avgSpeedAway=avg_speed))
                     )
@@ -435,7 +457,7 @@ def run(
         #     cv2.imshow("farsec", frame)
         #     cv2.waitKey(1000)
         # else:
-        cv2.imwrite("frames_detected/frame_after_detection.jpg", frame)
+        cv2.imwrite(f"frames_detected/frame_after_detection_{frame_count}.jpg", frame)
 
         if frame_count % 500 == 0:
             print(
@@ -473,7 +495,7 @@ def main(session_path_local: str, path_to_video: str, enable_visual: bool):
         print("Calibration did not finish, skip evaluation.")
     else:
         # Evaluation
-        # plot_absolute_error([log_name], "logs/")
+        plot_absolute_error([log_name], "logs/")
         print("Put your evaluation here.")
 
 
