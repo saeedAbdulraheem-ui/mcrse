@@ -495,7 +495,7 @@ def main(session_path_local: str, path_to_video: str, enable_visual: bool):
         print("Calibration did not finish, skip evaluation.")
     else:
         # Evaluation
-        plot_absolute_error([log_name], "logs/")
+        plot_absolute_error([log_name], "logs/", "gt_logs")
         print("Put your evaluation here.")
 
 

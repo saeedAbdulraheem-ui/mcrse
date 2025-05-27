@@ -29,12 +29,16 @@ def __load_log(log_path: str):
             if not line.startswith("INFO:root:{"):
                 continue
             line_dict = json.loads(line[10:])
-            if "avgSpeedTowards" in line_dict:
-                avg_speeds.append(line_dict)
+            # Only append if avgSpeedTowards or avgSpeedAway are present
+            if "avgSpeedTowards" in line_dict or "avgSpeedAway" in line_dict:
+                avg_speeds.append({
+                    "frameId": line_dict.get("frameId"),
+                    "avgSpeedTowards": line_dict.get("avgSpeedTowards"),
+                    "avgSpeedAway": line_dict.get("avgSpeedAway"),
+                })
 
     video_id = cars_path.strip("/").split("/")[-1] if cars_path is not None else "-1"
     estimation = pd.DataFrame(avg_speeds)
-    # estimation.rename({'avgSpeedLastMinute': f"{video_id}_depth_{max_depth}"}, inplace=True)
     return (f"{video_id}_depth_{max_depth}", estimation, cars_path)
 
 
@@ -71,22 +75,23 @@ def __generate_aligned_estimations(run_ids, loaded_avg_speeds, ground_truth):
     return truth, estimations, timestamps
 
 
-def plot_absolute_error(logs: List[str], save_file_path: str = "") -> None:
-    """Plot the absolut error of the recorded speed.
+def plot_absolute_error(logs: List[str], save_file_path: str = "", ground_truth_log: str = None) -> None:
+    """Plot the absolute error of the recorded speed.
 
-    After the speed estimation is done, this function will plot the absolut error of the
+    After the speed estimation is done, this function will plot the absolute error of the
     predictions.
 
-    This function is designed to operate on the BrnoCompSpeed Dataset, as this dataset has a ground
-    truth.
-    If you have a dataset with ground truth in a different format, you can add a custom evaluation
-    script.
+    This function is designed to operate on datasets where ground truth is available in a log file
+    with the same format as the estimation logs.
 
     @param logs:
         Array of logs that should be analyzed.
 
     @param save_file_path:
         Path to the directory where the plot should be saved.
+
+    @param ground_truth_log:
+        Path to the ground truth log directory (will use the most recent .log file).
     """
     run_ids, loaded_avg_speeds, cars_paths = zip(*list(map(__load_log, logs)))
 
@@ -96,21 +101,52 @@ def plot_absolute_error(logs: List[str], save_file_path: str = "") -> None:
         if c != cars_path:
             raise Exception("Can only evaluate logs of the same video in one call!")
 
-    cars = pd.read_csv(cars_path + "cars.csv")
-    truth, estimations, timestamps = __generate_aligned_estimations(
-        run_ids, loaded_avg_speeds, cars
-    )
+    if ground_truth_log is None or not os.path.isdir(ground_truth_log):
+        raise ValueError("ground_truth_log must be provided and point to a directory containing .log files.")
+
+    # Find the most recent log file in the ground_truth_log directory
+    log_files = [
+        f for f in os.listdir(ground_truth_log)
+        if re.match(r"\d{8}-\d{6}_run_[a-f0-9]{10,}\.log", f)
+    ]
+    if not log_files:
+        raise FileNotFoundError("No ground truth log files found in the specified directory.")
+
+    log_files.sort(reverse=True)
+    most_recent_log = os.path.join(ground_truth_log, log_files[0])
+
+    # Load ground truth from the most recent log file
+    gt_run_id, gt_estimation, gt_cars_path = __load_log(most_recent_log)
+
+    # Align on frameId
+    # Prepare DataFrames for both avgSpeedTowards and avgSpeedAway
+    df_towards = gt_estimation[["frameId", "avgSpeedTowards"]].rename(columns={"avgSpeedTowards": "truth_towards"})
+    df_away = gt_estimation[["frameId", "avgSpeedAway"]].rename(columns={"avgSpeedAway": "truth_away"})
+
+    for run_id, estimation in zip(run_ids, loaded_avg_speeds):
+        df_towards = df_towards.merge(
+            estimation[["frameId", "avgSpeedTowards"]].rename(columns={"avgSpeedTowards": f"{run_id}_towards"}),
+            on="frameId",
+            how="outer"
+        )
+        df_away = df_away.merge(
+            estimation[["frameId", "avgSpeedAway"]].rename(columns={"avgSpeedAway": f"{run_id}_away"}),
+            on="frameId",
+            how="outer"
+        )
+
+    # Combine both DataFrames for further processing if needed
+    df = pd.merge(df_towards, df_away, on="frameId", how="outer")
+    df = df.sort_values("frameId").reset_index(drop=True)
+    df.dropna(axis=0, inplace=True)
 
     video_id = cars_path.strip("/").split("/")[-1]
-    # Calculate values per minute
-    df = pd.DataFrame({"truth": truth, **estimations, "timestamps": timestamps})
-    # Remove timestamps where no estimations or truth is available
-    df.dropna(axis=0, inplace=True)
-    fig = px.line(
-        df, x="timestamps", y=df.columns, title=f"Absolute Estimations ({cars_path})"
-    )
-
     id = uuid.uuid4().hex[:10]
+
+    # Plot absolute estimations
+    fig = px.line(
+        df, x="frameId", y=df.columns[1:], title=f"Absolute Estimations ({cars_path})"
+    )
 
     if save_file_path != "":
         fig.write_image(
@@ -119,20 +155,37 @@ def plot_absolute_error(logs: List[str], save_file_path: str = "") -> None:
     else:
         fig.show()
 
-    run_id_list = list(run_ids)
-    df[run_id_list] = df[run_id_list].sub(df["truth"], axis=0)
-    fig = px.line(
-        df, x="timestamps", y=df.columns[1:], title=f"Mean Absolute Error ({cars_path})"
+    # Select columns for error calculation (towards and away directions)
+    run_id_towards_cols = [f"{run_id}_towards" for run_id in run_ids]
+    run_id_away_cols = [f"{run_id}_away" for run_id in run_ids]
+
+    # Calculate error (estimation - truth) for both directions
+    df_error_towards = df[run_id_towards_cols].sub(df["truth_towards"], axis=0)
+    df_error_away = df[run_id_away_cols].sub(df["truth_away"], axis=0)
+
+    # Plot mean absolute error for both directions
+    fig_towards = px.line(
+        pd.concat([df[["frameId"]], df_error_towards], axis=1),
+        x="frameId", y=run_id_towards_cols, title=f"Mean Absolute Error Towards ({cars_path})"
+    )
+    fig_away = px.line(
+        pd.concat([df[["frameId"]], df_error_away], axis=1),
+        x="frameId", y=run_id_away_cols, title=f"Mean Absolute Error Away ({cars_path})"
     )
 
-    if save_file_path is not None:
-        fig.write_image(file=os.path.join(save_file_path, f"{video_id}_{id}_mae.pdf"))
+    if save_file_path:
+        fig_towards.write_image(file=os.path.join(save_file_path, f"{video_id}_{id}_mae_towards.pdf"))
+        fig_away.write_image(file=os.path.join(save_file_path, f"{video_id}_{id}_mae_away.pdf"))
     else:
-        fig.show()
+        fig_towards.show()
+        fig_away.show()
 
-    if save_file_path is not None:
-        csv_path = os.path.join(save_file_path, f"{video_id}_{id}_error.csv")
-        df[run_id_list].mean(axis=0).to_csv(csv_path)
+    # Save mean errors to CSV
+    if save_file_path:
+        error_csv_path = os.path.join(save_file_path, f"{video_id}_{id}_error.csv")
+        mean_error_towards = df_error_towards.abs().mean(axis=0).rename("mae_towards")
+        mean_error_away = df_error_away.abs().mean(axis=0).rename("mae_away")
+        pd.concat([mean_error_towards, mean_error_away], axis=1).to_csv(error_csv_path)
 
 
 def main():
