@@ -2,11 +2,11 @@ from dataclasses import dataclass
 from typing import Dict, List, NamedTuple, Tuple
 
 import numpy as np
-from modules.depth_map.depth_map_utils import DepthModel
+from speed_estimation.modules.depth_map.depth_map_utils import DepthModel
 from numpy.typing import NDArray
 from scipy.linalg import norm
 from scipy.spatial import distance
-from utils.speed_estimation import Line, Point, TrackingBox, get_intersection
+from speed_estimation.utils.speed_estimation import Line, Point, TrackingBox, get_intersection
 
 # Mapping from YOLO class IDs to average object lengths in meters
 # Mapping from YOLOv4 class IDs to average horizontal object lengths in meters
@@ -175,7 +175,21 @@ class GeometricModel:
         return self.scale_factor * self.__get_unscaled_distance_from_camera_points(
             cp1, cp2
         )
+    
+    def get_scaled_distance_from_camera_points(
+        self, cp1: CameraPoint, cp2: CameraPoint
+    ) -> float:
+        """Get the scaled distance between two two-dimensional CameraPoints in meters.
 
+        @param cp1:
+            First CameraPoint.
+        @param cp2:
+            Second CameraPoint.
+        @return:
+            Returns the scaled distance between those CameraPoints in meters.
+        """
+        return self.__get_scaled_distance_from_camera_points(cp1, cp2)
+    
     def __get_unscaled_world_point(self, cp: CameraPoint) -> WorldPoint:
         normalised_u = self.scaling_x * (cp.x_coord - self.center_x)
         normalised_v = self.scaling_y * (cp.y_coord - self.center_y)
@@ -185,7 +199,7 @@ class GeometricModel:
             x=self.focal_length, y=normalised_u, z=normalised_v
         )
 
-        depth_map = self.depth_model.predict_depth(cp.frame)
+        depth_map, _ = self.depth_model.predict_depth(cp.frame)
         unscaled_depth: float = depth_map[cp.y_coord, cp.x_coord]
 
         # we also mirror theta around pi and phi around 0
@@ -193,6 +207,53 @@ class GeometricModel:
         phi = -phi
 
         x, y, z = self.__spherical_to_cartesian(r=unscaled_depth, theta=theta, phi=phi)
+
+        # relabeling again for the world reference system
+        return WorldPoint(frame=cp.frame, x_coord=y, y_coord=z, z_coord=x)
+
+    def __get_scaled_world_point(self, cp: CameraPoint) -> WorldPoint:
+        """
+        Computes the scaled world coordinates of a given camera point using depth estimation and camera intrinsics.
+
+        Args:
+            cp (CameraPoint): The camera point containing frame and pixel coordinates.
+
+        Returns:
+            WorldPoint: The corresponding world point with coordinates (x, y, z) in the world reference system.
+
+        Notes:
+            - Updates camera intrinsics (focal length, principal point) from depth model predictions.
+            - Normalizes pixel coordinates based on intrinsics.
+            - Converts normalized coordinates from cartesian to spherical, applies axis relabeling and mirroring.
+            - Uses predicted depth to scale the spherical coordinates and converts back to cartesian.
+            - Returns the world point with relabeled axes to match the world reference system.
+        """
+        depth_map, preds  = self.depth_model.predict_depth(cp.frame)
+        #update camera intrinsics from preds
+        intrinsics = preds["intrinsics"]
+        self.focal_length = float(intrinsics[0, 0, 0])
+        self.scaling_x = 1.0
+        self.scaling_y = 1.0
+        
+        # normalization axis is initialized from the first frame, don't need to update it here
+        # self.center_x = float(intrinsics[0, 0, 2])
+        # self.center_y = float(intrinsics[0, 1, 2])
+        normalised_u = self.scaling_x * (cp.x_coord - self.center_x)
+        normalised_v = self.scaling_y * (cp.y_coord - self.center_y)
+
+        # we relabel the axis here to deal with different reference conventions
+        _, theta, phi = self.__cartesian_to_spherical(
+            x=self.focal_length, y=normalised_u, z=normalised_v
+        )
+
+        # Use the scaled depth model (depth in meters)
+        scaled_depth: float = depth_map[cp.y_coord, cp.x_coord]
+
+        # we also mirror theta around pi and phi around 0
+        theta = np.pi - theta
+        phi = -phi
+
+        x, y, z = self.__spherical_to_cartesian(r=scaled_depth, theta=theta, phi=phi)
 
         # relabeling again for the world reference system
         return WorldPoint(frame=cp.frame, x_coord=y, y_coord=z, z_coord=x)
@@ -253,6 +314,15 @@ class GeometricModel:
         unscaled_wp2 = self.__get_unscaled_world_point(cp2)
         return self.__calculate_distance_between_world_points(
             unscaled_wp1, unscaled_wp2
+        )
+    
+    def __get_scaled_distance_from_camera_points(
+        self, cp1: CameraPoint, cp2: CameraPoint
+    ):
+        scaled_wp1 = self.__get_scaled_world_point(cp1)
+        scaled_wp2 = self.__get_scaled_world_point(cp2)
+        return self.__calculate_distance_between_world_points(
+            scaled_wp1, scaled_wp2
         )
 
 

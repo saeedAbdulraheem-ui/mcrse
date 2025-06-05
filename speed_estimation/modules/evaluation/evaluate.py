@@ -120,20 +120,28 @@ def plot_absolute_error(logs: List[str], save_file_path: str = "", ground_truth_
 
     # Align on frameId
     # Prepare DataFrames for both avgSpeedTowards and avgSpeedAway
-    df_towards = gt_estimation[["frameId", "avgSpeedTowards"]].rename(columns={"avgSpeedTowards": "truth_towards"})
-    df_away = gt_estimation[["frameId", "avgSpeedAway"]].rename(columns={"avgSpeedAway": "truth_away"})
-
+    df_towards = gt_estimation[["frameId", "avgSpeedTowards"]]
+    df_away = gt_estimation[["frameId", "avgSpeedAway"]]
     for run_id, estimation in zip(run_ids, loaded_avg_speeds):
-        df_towards = df_towards.merge(
-            estimation[["frameId", "avgSpeedTowards"]].rename(columns={"avgSpeedTowards": f"{run_id}_towards"}),
-            on="frameId",
-            how="outer"
-        )
-        df_away = df_away.merge(
-            estimation[["frameId", "avgSpeedAway"]].rename(columns={"avgSpeedAway": f"{run_id}_away"}),
-            on="frameId",
-            how="outer"
-        )
+        # Merge truth_towards if columns exist
+        if "frameId" in estimation.columns and "avgSpeedTowards" in estimation.columns:
+            df_towards = df_towards.merge(
+                estimation[["frameId", "avgSpeedTowards"]].rename(columns={"avgSpeedTowards": f"{run_id}_towards"}),
+                on="frameId",
+                how="outer"
+            )
+        else:
+            print(f"Warning: 'frameId' or 'avgSpeedTowards' not found in estimation for run_id {run_id}")
+        # Merge avgSpeedAway if columns exist
+        if "frameId" in estimation.columns and "avgSpeedAway" in estimation.columns:
+            print("Merging avgSpeedAway for run_id:", run_id)
+            df_away = df_away.merge(
+                estimation[["frameId", "avgSpeedAway"]].rename(columns={"avgSpeedAway": f"{run_id}_away"}),
+                on="frameId",
+                how="outer"
+            )
+        else:
+            print(f"Warning: 'frameId' or 'avgSpeedAway' not found in estimation for run_id {run_id}")
 
     # Combine both DataFrames for further processing if needed
     df = pd.merge(df_towards, df_away, on="frameId", how="outer")
@@ -160,8 +168,8 @@ def plot_absolute_error(logs: List[str], save_file_path: str = "", ground_truth_
     run_id_away_cols = [f"{run_id}_away" for run_id in run_ids]
 
     # Calculate error (estimation - truth) for both directions
-    df_error_towards = df[run_id_towards_cols].sub(df["truth_towards"], axis=0)
-    df_error_away = df[run_id_away_cols].sub(df["truth_away"], axis=0)
+    df_error_towards = df[run_id_towards_cols].sub(df["avgSpeedTowards"], axis=0)
+    df_error_away = df[run_id_away_cols].sub(df["avgSpeedAway"], axis=0)
 
     # Plot mean absolute error for both directions
     fig_towards = px.line(
