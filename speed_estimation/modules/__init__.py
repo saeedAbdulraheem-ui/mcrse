@@ -1,6 +1,8 @@
 """Modules that are used in the speed estimation pipeline are defined in this module."""
 
 from .depth_map.depth_map_utils import DepthModel
+from .depth_map.depth_map_utils_temporal import DepthModelTemporal
+# from .depth_map.FlashDepth import FlashDepth
 from .object_detection.yolov4.object_detection import (
     ObjectDetection as ObjectDetectionYoloV4,
 )

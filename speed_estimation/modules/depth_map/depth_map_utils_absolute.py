@@ -6,7 +6,7 @@ from numpy.typing import NDArray
 import torch
 from PIL import Image
 import numpy as np
-# from Unidepth.unidepth.models import UniDepthV2
+import time
 
 
 class DepthModelAbsolute:
@@ -26,7 +26,7 @@ class DepthModelAbsolute:
         self.memo: dict[int, NDArray] = {}
         self.pred_memo: dict[int, dict] = {}
         from speed_estimation.modules.depth_map.Unidepth.unidepth.models import UniDepthV2
-        model = UniDepthV2.from_pretrained("lpiccinelli/unidepth-v2-vitl14") # load a lighter model maybe
+        model = UniDepthV2.from_pretrained("lpiccinelli/unidepth-v2-vitS14") # load a lighter model
         model.eval()
         self.model = model.to("cuda")
 
@@ -48,11 +48,14 @@ class DepthModelAbsolute:
             # Depth map already predicted
             return self.memo[frame_id], self.pred_memo[frame_id]
 
-        if len(self.memo) > 10 and len(self.pred_memo) > 1:
-            # Take the mean over all depth maps
-            depth_maps: List[NDArray] = [self.memo[frame] for frame in self.memo]
-            latest_key = max(self.pred_memo.keys())
-            return sum(depth_maps) / len(depth_maps), self.pred_memo[latest_key]
+        # Limit memoization size to avoid memory leak
+        MAX_MEMO_SIZE = 100
+        if len(self.memo) > MAX_MEMO_SIZE:
+            # Remove the oldest entry
+            oldest_key = next(iter(self.memo))
+            del self.memo[oldest_key]
+            if oldest_key in self.pred_memo:
+                del self.pred_memo[oldest_key]
 
         self.memo[frame_id], self.pred_memo[frame_id] = self.load_depth(
             self.data_dir, self.path_to_video, frame_idx=frame_id
@@ -148,7 +151,7 @@ class DepthModelAbsolute:
         # img_resized = resize_input(img_rgb)  # Ensure correct input size
 
         # Convert to tensor and normalize
-        img_tensor = torch.from_numpy(np.array(Image.open(img_path))).permute(2, 0, 1)
+        img_tensor = torch.from_numpy(np.array(Image.open(img_path))).permute(2, 0, 1).to(device)
 
         # Inference
         with torch.no_grad():
@@ -157,5 +160,17 @@ class DepthModelAbsolute:
                 depth_map = output["depth"].squeeze().cpu().numpy()
             else:
                 depth_map = output.squeeze().cpu().numpy()
+
+        # Explicitly delete tensors and call torch.cuda.empty_cache()
+        del img_tensor
+        if isinstance(output, dict):
+            for v in output.values():
+                if torch.is_tensor(v):
+                    del v
+        else:
+            if torch.is_tensor(output):
+                del output
+        torch.cuda.empty_cache()
+
         return depth_map, output
     

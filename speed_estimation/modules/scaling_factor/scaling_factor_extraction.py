@@ -123,7 +123,7 @@ class GeometricModel:
             The depth model that has to be applied to predict the depth of the whole frame.
         """
         self.depth_model = depth_model
-        self.focal_length: float = 105.0
+        self.focal_length: float = 10.0
         self.scaling_x: int = 1
         self.scaling_y: int = 1
         self.center_x: int = 1
@@ -199,8 +199,12 @@ class GeometricModel:
             x=self.focal_length, y=normalised_u, z=normalised_v
         )
 
-        depth_map, _ = self.depth_model.predict_depth(cp.frame)
-        unscaled_depth: float = depth_map[cp.y_coord, cp.x_coord]
+        result = self.depth_model.predict_depth(cp.frame)
+        if result is None:
+            raise ValueError(f"Depth model returned None for frame {cp.frame}")
+        depth_map = result[0] if isinstance(result, tuple) else result
+        np_depth_map = np.array(depth_map)
+        unscaled_depth: float = np_depth_map[cp.y_coord, cp.x_coord]
 
         # we also mirror theta around pi and phi around 0
         theta = np.pi - theta
@@ -232,12 +236,9 @@ class GeometricModel:
         #update camera intrinsics from preds
         intrinsics = preds["intrinsics"]
         self.focal_length = float(intrinsics[0, 0, 0])
-        self.scaling_x = 1.0
-        self.scaling_y = 1.0
+        self.scaling_x = 1.0 #/ float(intrinsics[0, 0, 0])
+        self.scaling_y = 1.0 #/ float(intrinsics[0, 1, 1])
         
-        # normalization axis is initialized from the first frame, don't need to update it here
-        # self.center_x = float(intrinsics[0, 0, 2])
-        # self.center_y = float(intrinsics[0, 1, 2])
         normalised_u = self.scaling_x * (cp.x_coord - self.center_x)
         normalised_v = self.scaling_y * (cp.y_coord - self.center_y)
 
@@ -248,6 +249,67 @@ class GeometricModel:
 
         # Use the scaled depth model (depth in meters)
         scaled_depth: float = depth_map[cp.y_coord, cp.x_coord]
+
+        # we also mirror theta around pi and phi around 0
+        theta = np.pi - theta
+        phi = -phi
+
+        x, y, z = self.__spherical_to_cartesian(r=scaled_depth, theta=theta, phi=phi)
+
+        # relabeling again for the world reference system
+        return WorldPoint(frame=cp.frame, x_coord=y, y_coord=z, z_coord=x)
+    
+    def get_scaled_world_point(self, cp: CameraPoint) -> WorldPoint:
+        """
+        Computes the scaled world coordinates of a given camera point using depth estimation and camera intrinsics.
+
+        Args:
+            cp (CameraPoint): The camera point containing frame and pixel coordinates.
+
+        Returns:
+            WorldPoint: The corresponding world point with coordinates (x, y, z) in the world reference system.
+
+        Notes:
+            - Updates camera intrinsics (focal length, principal point) from depth model predictions.
+            - Normalizes pixel coordinates based on intrinsics.
+            - Converts normalized coordinates from cartesian to spherical, applies axis relabeling and mirroring.
+            - Uses predicted depth to scale the spherical coordinates and converts back to cartesian.
+            - Returns the world point with relabeled axes to match the world reference system.
+        """
+        depth_map, preds  = self.depth_model.predict_depth(cp.frame)
+
+        # Write the depth map to an image file for debugging
+        # Normalize depth map to 0-255 and apply a colormap for better visualization
+        # TODO(SAID): Remove this debug code in production
+        # import cv2
+        # debug_depth_img = (255 * (depth_map - np.min(depth_map)) / (np.ptp(depth_map) + 1e-8)).astype(np.uint8)
+        # debug_depth_img_color = cv2.applyColorMap(debug_depth_img, cv2.COLORMAP_JET)
+        # cv2.imwrite(f"debug/debug_depth_frame_{cp.frame}.png", debug_depth_img_color)
+
+        #update camera intrinsics from preds
+        intrinsics = preds["intrinsics"]
+        self.focal_length = float(intrinsics[0, 0, 0])
+        self.scaling_x = 1.0 #/ float(intrinsics[0, 0, 0])
+        self.scaling_y = 1.0 #/ float(intrinsics[0, 1, 1])
+        
+        normalised_u = self.scaling_x * (cp.x_coord - self.center_x)
+        normalised_v = self.scaling_y * (cp.y_coord - self.center_y)
+
+        # we relabel the axis here to deal with different reference conventions
+        _, theta, phi = self.__cartesian_to_spherical(
+            x=self.focal_length, y=normalised_u, z=normalised_v
+        )
+
+        # Use the scaled depth model (depth in meters)
+        # Get the median depth in a 5x5 window around the point of interest
+        y, x = cp.y_coord, cp.x_coord
+        h, w = depth_map.shape
+        y_min = max(0, y - 2)
+        y_max = min(h, y + 3)
+        x_min = max(0, x - 2)
+        x_max = min(w, x + 3)
+        window = depth_map[y_min:y_max, x_min:x_max]
+        scaled_depth: float = float(np.median(window))
 
         # we also mirror theta around pi and phi around 0
         theta = np.pi - theta

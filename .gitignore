@@ -153,3 +153,6 @@ speed_estimation/modules/depth_map/PixelFormer/pixelformer
 
 # misc
 datasets/
+debug/
+speed_estimation/modules/depth_map/FlashDepth/configs
+outputs
