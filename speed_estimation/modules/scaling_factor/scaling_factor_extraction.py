@@ -123,7 +123,7 @@ class GeometricModel:
             The depth model that has to be applied to predict the depth of the whole frame.
         """
         self.depth_model = depth_model
-        self.focal_length: float = 10.0
+        self.focal_length: float = 100.0
         self.scaling_x: int = 1
         self.scaling_y: int = 1
         self.center_x: int = 1
