@@ -181,6 +181,11 @@ def run(
         # load frame, shake detection and object detection
         ############################
         ret, frame = input_video.read()
+        if not ret:
+            print("No more frames to read.")
+            break
+
+        frame = cv2.resize(frame, (1246, 378))
         frame_start_time = time.time()
 
         if frame_count == 0:
@@ -190,8 +195,8 @@ def run(
             geo_model.set_normalization_axes(center_x, center_y)
 
         # TODO(SAID): run for only X frames, testing
-        if is_calibrated and frame_count == 200:
-            print("Stopping after 200 frames for testing purposes.")
+        if is_calibrated and frame_count ==400:
+            print("Stopping after 400 frames for testing purposes.")
             break
 
         if not ret:
@@ -224,9 +229,9 @@ def run(
                 for i, class_id in enumerate(class_ids)
                 if (
                     class_id == CAR_CLASS_ID
-                    or class_id == PED_CLASS_ID
-                    or class_id == CYCLE_CLASS_ID
-                    or class_id == MOTORBIKE_CLASS_ID
+                    # or class_id == PED_CLASS_ID
+                    # or class_id == CYCLE_CLASS_ID
+                    # or class_id == MOTORBIKE_CLASS_ID
                 )
                 and scores[i] >= OBJECT_DETECTION_MIN_CONFIDENCE_SCORE
             ]
@@ -397,8 +402,8 @@ def run(
                             #     f"frame {frame_count} obj ID {car_id}, meters moved: {meters_moved:.2f}, frames seen: {car.frames_seen}, ")
                             # print(
                             #     f"point 1 in meters: {point_1_in_meters}, point 2 in meters: {point_2_in_meters}")
-                            if meters_moved <= 6:
-                                continue
+                            # if meters_moved <= 0.3:
+                            #     continue
 
                             if car.direction == Direction.TOWARDS:
                                 car_count_towards += 1

@@ -57,15 +57,15 @@ class DepthModelTemporal:
             # Depth map already predicted
             return self.memo[frame_id]
 
-        if len(self.memo) > 10:
-            # Take the mean over all depth maps
-            depth_maps: List[NDArray] = [
-                np.array(self.memo[frame]) for frame in self.memo
-            ]
-            # Ensure all depth maps have the same shape before stacking
-            min_shape = np.min([dm.shape for dm in depth_maps], axis=0)
-            depth_maps = [dm[:min_shape[0], :min_shape[1]] for dm in depth_maps]
-            return np.mean(np.stack(depth_maps, axis=0), axis=0)
+        # if len(self.memo) > 10:
+        #     # Take the mean over all depth maps
+        #     depth_maps: List[NDArray] = [
+        #         np.array(self.memo[frame]) for frame in self.memo
+        #     ]
+        #     # Ensure all depth maps have the same shape before stacking
+        #     min_shape = np.min([dm.shape for dm in depth_maps], axis=0)
+        #     depth_maps = [dm[:min_shape[0], :min_shape[1]] for dm in depth_maps]
+        #     return np.mean(np.stack(depth_maps, axis=0), axis=0)
 
         self.memo[frame_id] = self.load_depth_map(
             self.data_dir, self.path_to_video, max_depth=1, frame_idx=frame_id
@@ -98,11 +98,9 @@ class DepthModelTemporal:
         @return:
             Returns the depth map of the specified frame.
         """
-        print("Depth map generation.")
         scaled_image_name, original_shape = extract_frame(
             path_to_video, current_folder, "frame_%d_scaled.jpg", frame_idx
         )
-        print(f"Extracted scaled frame to {scaled_image_name}")
         
         img_path = os.path.join(current_folder, scaled_image_name)
         frame = cv2.imread(img_path)
@@ -155,7 +153,7 @@ def resize_input(frame):
     """
     padding_right = get_padding_right(frame.shape)
 
-    frame = imutils.resize(frame, height=352)
+    frame = imutils.resize(frame, width=1246, height=378)
 
     if frame.shape[1] > 1216:
         frame = frame[:, 0:1215]

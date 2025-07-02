@@ -29,11 +29,11 @@ def __load_log(log_path: str):
             if not line.startswith("INFO:root:{"):
                 continue
             line_dict = json.loads(line[10:])
-            # Only append if avgSpeedTowards or avgSpeedAway are present
-            if "avgSpeedTowards" in line_dict or "avgSpeedAway" in line_dict:
+            # Only append if avgSpeedAway or avgSpeedAway are present
+            if "avgSpeedAway" in line_dict or "avgSpeedAway" in line_dict:
                 avg_speeds.append({
                     "frameId": line_dict.get("frameId"),
-                    "avgSpeedTowards": line_dict.get("avgSpeedTowards"),
+                    "avgSpeedAway": line_dict.get("avgSpeedAway"),
                     "avgSpeedAway": line_dict.get("avgSpeedAway"),
                 })
 
@@ -55,7 +55,7 @@ def __avg_speed_for_time_estimation(estimation, timeStart, timeEnd):
     estimation_avg = estimation.loc[
         estimation["frameId"].gt(timeStart) & estimation["frameId"].le(timeEnd)
     ]
-    return estimation_avg["avgSpeedTowards"].mean()
+    return estimation_avg["avgSpeedAway"].mean()
 
 
 def __generate_aligned_estimations(run_ids, loaded_avg_speeds, ground_truth):
@@ -119,32 +119,23 @@ def plot_absolute_error(logs: List[str], save_file_path: str = "", ground_truth_
     gt_run_id, gt_estimation, gt_cars_path = __load_log(most_recent_log)
 
     # Align on frameId
-    # Prepare DataFrames for both avgSpeedTowards and avgSpeedAway
-    df_towards = gt_estimation[["frameId", "avgSpeedTowards"]]
-    df_away = gt_estimation[["frameId", "avgSpeedAway"]]
+    # Prepare DataFrames for both avgSpeedAway and avgSpeedAway
+    print("gt estimation columns:", gt_estimation.columns)
+    df_towards = gt_estimation[["frameId", "avgSpeedAway"]]
     for run_id, estimation in zip(run_ids, loaded_avg_speeds):
         # Merge truth_towards if columns exist
-        if "frameId" in estimation.columns and "avgSpeedTowards" in estimation.columns:
-            df_towards = df_towards.merge(
-                estimation[["frameId", "avgSpeedTowards"]].rename(columns={"avgSpeedTowards": f"{run_id}_towards"}),
-                on="frameId",
-                how="outer"
-            )
-        else:
-            print(f"Warning: 'frameId' or 'avgSpeedTowards' not found in estimation for run_id {run_id}")
-        # Merge avgSpeedAway if columns exist
         if "frameId" in estimation.columns and "avgSpeedAway" in estimation.columns:
-            print("Merging avgSpeedAway for run_id:", run_id)
-            df_away = df_away.merge(
-                estimation[["frameId", "avgSpeedAway"]].rename(columns={"avgSpeedAway": f"{run_id}_away"}),
+            df_towards = df_towards.merge(
+                estimation[["frameId", "avgSpeedAway"]].rename(columns={"avgSpeedAway": f"{run_id}_towards"}),
                 on="frameId",
                 how="outer"
             )
         else:
             print(f"Warning: 'frameId' or 'avgSpeedAway' not found in estimation for run_id {run_id}")
+        # Merge avgSpeedAway if columns exist
 
     # Combine both DataFrames for further processing if needed
-    df = pd.merge(df_towards, df_away, on="frameId", how="outer")
+    df = df_towards.copy()
     df = df.sort_values("frameId").reset_index(drop=True)
     df.dropna(axis=0, inplace=True)
 
@@ -165,35 +156,26 @@ def plot_absolute_error(logs: List[str], save_file_path: str = "", ground_truth_
 
     # Select columns for error calculation (towards and away directions)
     run_id_towards_cols = [f"{run_id}_towards" for run_id in run_ids]
-    run_id_away_cols = [f"{run_id}_away" for run_id in run_ids]
 
     # Calculate error (estimation - truth) for both directions
-    df_error_towards = df[run_id_towards_cols].sub(df["avgSpeedTowards"], axis=0)
-    df_error_away = df[run_id_away_cols].sub(df["avgSpeedAway"], axis=0)
+    df_error_towards = df[run_id_towards_cols].sub(df["avgSpeedAway"], axis=0)
 
     # Plot mean absolute error for both directions
     fig_towards = px.line(
         pd.concat([df[["frameId"]], df_error_towards], axis=1),
-        x="frameId", y=run_id_towards_cols, title=f"Mean Absolute Error Towards ({cars_path})"
-    )
-    fig_away = px.line(
-        pd.concat([df[["frameId"]], df_error_away], axis=1),
-        x="frameId", y=run_id_away_cols, title=f"Mean Absolute Error Away ({cars_path})"
+        x="frameId", y=run_id_towards_cols, title=f"Mean Absolute Error Away ({cars_path})"
     )
 
     if save_file_path:
-        fig_towards.write_image(file=os.path.join(save_file_path, f"{video_id}_{id}_mae_towards.pdf"))
-        fig_away.write_image(file=os.path.join(save_file_path, f"{video_id}_{id}_mae_away.pdf"))
+        fig_towards.write_image(file=os.path.join(save_file_path, f"{video_id}_{id}_mae_away.pdf"))
     else:
         fig_towards.show()
-        fig_away.show()
 
     # Save mean errors to CSV
     if save_file_path:
         error_csv_path = os.path.join(save_file_path, f"{video_id}_{id}_error.csv")
-        mean_error_towards = df_error_towards.abs().mean(axis=0).rename("mae_towards")
-        mean_error_away = df_error_away.abs().mean(axis=0).rename("mae_away")
-        pd.concat([mean_error_towards, mean_error_away], axis=1).to_csv(error_csv_path)
+        mean_error_towards = df_error_towards.abs().mean(axis=0).rename("mae_away")
+        pd.concat([mean_error_towards], axis=1).to_csv(error_csv_path)
 
 
 def main():

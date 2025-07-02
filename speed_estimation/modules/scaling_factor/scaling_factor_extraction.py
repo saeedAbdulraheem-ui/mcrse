@@ -12,10 +12,10 @@ from speed_estimation.utils.speed_estimation import Line, Point, TrackingBox, ge
 # Mapping from YOLOv4 class IDs to average horizontal object lengths in meters
 # (indices based on YOLOv4: 0=person, 1=bicycle, 2=car, 3=motorbike)
 YOLO_CLASS_ID_TO_AVG_LENGTH = {
-    0: 0.5,   # person (average horizontal width)
-    1: 1.7,   # bicycle (horizontal length)
-    2: 6.0,   # car (horizontal length)
-    3: 2.1,   # motorbike (horizontal length)
+    # 0: 0.5,   # person (average horizontal width)
+    # 1: 1.7,   # bicycle (horizontal length)
+    2: 5.5,   # car (horizontal length)
+    # 3: 2.1,   # motorbike (horizontal length)
 }
 @dataclass
 class CameraPoint:
@@ -123,12 +123,27 @@ class GeometricModel:
             The depth model that has to be applied to predict the depth of the whole frame.
         """
         self.depth_model = depth_model
-        self.focal_length: float = 100.0
-        self.scaling_x: int = 1
-        self.scaling_y: int = 1
-        self.center_x: int = 1
-        self.center_y: int = 1
-        self.scale_factor: float = 1
+        # Example intrinsic matrix:
+        # | fx  s  cx |
+        # |  0 fy cy |
+        # |  0  0  1 |
+        # Given matrix:
+        # 0.45748904  0.45510265  95.80971527
+        # 0.04026574  1.66259563  -5.53627539
+        # -0.00011619 0.00107257  1.00000000
+
+        # Extract parameters from the matrix
+        fx = 0.45748904
+        fy = 1.66259563
+        cx = 95.80971527
+        cy = -5.53627539
+
+        self.focal_length: float = fx  # or fy, depending on convention
+        self.scaling_x: float = 1.0 / fx if fx != 0 else 1.0
+        self.scaling_y: float = 1.0 / fy if fy != 0 else 1.0
+        self.center_x: float = cx
+        self.center_y: float = cy
+        self.scale_factor: float = 1.0
 
     def set_normalization_axes(self, center_x: int, center_y: int) -> None:
         """Set the normalization axis.
@@ -200,10 +215,16 @@ class GeometricModel:
         )
 
         result = self.depth_model.predict_depth(cp.frame)
-        if result is None:
-            raise ValueError(f"Depth model returned None for frame {cp.frame}")
-        depth_map = result[0] if isinstance(result, tuple) else result
-        np_depth_map = np.array(depth_map)
+        # if result is None:
+        #     raise ValueError(f"Depth model returned None for frame {cp.frame}")
+        # depth_map = result[0] if isinstance(result, tuple) else result
+        np_depth_map = (np.array(result) * 255.0).astype(np.uint8)
+
+        # import cv2
+        # debug_depth_img = ((np_depth_map - np.min(np_depth_map)) / (np.ptp(np_depth_map) + 1e-8) * 255.0).astype(np.uint8)
+        # debug_depth_img_color = cv2.applyColorMap(debug_depth_img, cv2.COLORMAP_JET)
+        # cv2.imwrite(f"debug/debug_depth_frame_{cp.frame}.png", debug_depth_img_color)
+
         unscaled_depth: float = np_depth_map[cp.y_coord, cp.x_coord]
 
         # we also mirror theta around pi and phi around 0
@@ -557,5 +578,4 @@ def get_ground_truth_events(
                         average_object_length,
                     )
                 )
-
     return ground_truth_events
