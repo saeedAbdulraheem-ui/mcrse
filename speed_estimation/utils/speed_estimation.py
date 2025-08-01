@@ -92,7 +92,7 @@ class TrackingBox:
         self.class_id = class_id
         
 
-class Car:
+class MovingObject:
     """This class represents a car with all the relevant information for a speed estimation."""
 
     def __init__(
@@ -159,7 +159,7 @@ def get_intersection(line_a: Line, line_b: Line) -> Optional[Point]:
     return Point(*line_a.start.coords() + point_t * point_b.coords())
 
 
-def calculate_car_direction(car: Car) -> Direction:
+def calculate_car_direction(obj: MovingObject) -> Direction:
     """Get the Direction the car isd driving.
 
     This function calculates in which the car is driving (towards or away from the camera).
@@ -170,8 +170,8 @@ def calculate_car_direction(car: Car) -> Direction:
     @return:
         The direction the car is driving.
     """
-    first_box = car.tracked_boxes[0]
-    last_box = car.tracked_boxes[-1]
+    first_box = obj.tracked_boxes[0]
+    last_box = obj.tracked_boxes[-1]
 
     if (first_box.y_coord - last_box.y_coord) < 0:
         return Direction.TOWARDS

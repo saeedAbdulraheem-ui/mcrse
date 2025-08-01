@@ -34,13 +34,15 @@ from collections import defaultdict
 from datetime import datetime
 from importlib import reload
 from typing import Dict, List
-
+import numpy as np
 import cv2
 from tqdm import tqdm
 import hydra
 
 from speed_estimation.get_fps import get_fps
-from speed_estimation.modules.depth_map.depth_map_utils_temporal import DepthModelTemporal
+from speed_estimation.modules.depth_map.depth_map_utils_temporal import (
+    DepthModelTemporal,
+)
 from speed_estimation.modules.object_detection.yolov4.object_detection import (
     ObjectDetection as ObjectDetectionYoloV4,
 )
@@ -55,35 +57,39 @@ from speed_estimation.paths import SESSION_PATH, VIDEO_NAME
 from speed_estimation.utils.speed_estimation import (
     Direction,
     TrackingBox,
-    Car,
+    MovingObject,
     calculate_car_direction,
 )
 from speed_estimation.modules.evaluation.evaluate import plot_absolute_error
 from omegaconf import DictConfig
 from hydra.core.hydra_config import HydraConfig
 
+from ocsort import ocsort
+
 config = configparser.ConfigParser()
 config.read("speed_estimation/config.ini")
 
-MAX_TRACKING_MATCH_DISTANCE = config.getint("tracker", "max_match_distance")
-PED_CLASS_ID = config.getint("tracker", "ped_class_id")
-CYCLE_CLASS_ID = config.getint("tracker", "cycle_class_id")
+MAX_TRACKING_MATCH_THRESHOLD = config.getfloat("tracker", "max_match_distance")
+# PED_CLASS_ID = config.getint("tracker", "ped_class_id")
+# CYCLE_CLASS_ID = config.getint("tracker", "cycle_class_id")
 CAR_CLASS_ID = config.getint("tracker", "car_class_id")
-MOTORBIKE_CLASS_ID = config.getint("tracker", "motorbike_class_id")
+# MOTORBIKE_CLASS_ID = config.getint("tracker", "motorbike_class_id")
 NUM_TRACKED_CARS = config.getint("calibration", "num_tracked_cars")
 NUM_GT_EVENTS = config.getint("calibration", "num_gt_events")
 AVG_FRAME_COUNT = config.getfloat("analyzer", "avg_frame_count")
 SPEED_LIMIT = config.getint("analyzer", "speed_limit")
 SLIDING_WINDOW_SEC = config.getint("main", "sliding_window_sec")
 FPS = config.getint("main", "fps")
-CUSTOM_OBJECT_DETECTION = config.getboolean("main", "custom_object_detection")
+# CUSTOM_OBJECT_DETECTION = config.getboolean("main", "custom_object_detection")
 OBJECT_DETECTION_MIN_CONFIDENCE_SCORE = config.getfloat(
     "tracker", "object_detection_min_confidence_score"
 )
+DEBUG_MODE = config.getboolean("main", "debug_mode")
 
 frame_start_time = 0
 # frame_end_time = 0
 # frame_times = []
+
 
 def run(
     path_to_video: str,
@@ -164,7 +170,10 @@ def run(
     frame_count = 0
     track_id = 0
     tracking_objects: Dict[int, TrackingBox] = {}
-    tracked_cars: Dict[int, Car] = {}
+    tracked_object: Dict[int, MovingObject] = {}
+    tracker_ocsort = ocsort.OCSort(
+        det_thresh=MAX_TRACKING_MATCH_THRESHOLD, max_age=15, min_hits=2
+    )
     # tracked_boxes: Dict[int, List[TrackingBox]] = defaultdict(list)
     tracked_boxes: Dict[int, List[TrackingBox]] = defaultdict(list)
     depth_model = DepthModelTemporal(data_dir, path_to_video, cfg)
@@ -174,7 +183,6 @@ def run(
 
     # for shake_detection
     shake_detection = ShakeDetection()
-
 
     while True:
         ############################
@@ -190,9 +198,9 @@ def run(
             geo_model.set_normalization_axes(center_x, center_y)
 
         # TODO(SAID): run for only X frames, testing
-        if is_calibrated and frame_count == 200:
-            print("Stopping after 200 frames for testing purposes.")
-            break
+        # if is_calibrated and frame_count == 500:
+        #     print("Stopping after 500 frames for testing purposes.")
+        #     break
 
         if not ret:
             print("No more frames to read.")
@@ -212,81 +220,77 @@ def run(
         ############################
         car_detection_start_time = time.time()
         # print(f"Detecting objects in frame {frame_count}...")
-        if custom_object_detection:
-            # Detect cars with your custom object detection
-            boxes = []
-        else:
-            (class_ids, scores, boxes) = object_detection.detect(frame)
+        (class_ids, scores, boxes) = object_detection.detect(frame)
 
-            boxes = [
-                [boxes[i],
-                class_ids[i]]
-                for i, class_id in enumerate(class_ids)
-                if (
-                    class_id == CAR_CLASS_ID
-                    or class_id == PED_CLASS_ID
-                    or class_id == CYCLE_CLASS_ID
-                    or class_id == MOTORBIKE_CLASS_ID
-                )
-                and scores[i] >= OBJECT_DETECTION_MIN_CONFIDENCE_SCORE
-            ]
+        boxes = [
+            [boxes[i], class_ids[i]]
+            for i, class_id in enumerate(class_ids)
+            if (
+                class_id
+                == CAR_CLASS_ID
+                # or class_id == PED_CLASS_ID
+                # or class_id == CYCLE_CLASS_ID
+                # or class_id == MOTORBIKE_CLASS_ID
+            )
+            and scores[i] >= OBJECT_DETECTION_MIN_CONFIDENCE_SCORE
+        ]
 
         # collect tracking boxes
-        tracking_boxes_cur_frame: List[TrackingBox] = []
-        for box in boxes:
+        dets = []
+        for box, score in zip(boxes, scores):
             (x_coord, y_coord, width, height) = box[0].astype(int)
             center_x = int((x_coord + x_coord + width) / 2)
             center_y = int((y_coord + y_coord + height) / 2)
             class_id = int(box[1])
+            dets.append([x_coord, y_coord, x_coord + width, y_coord + height, score])
 
-            tracking_boxes_cur_frame.append(
-                TrackingBox(
-                    center_x, center_y, x_coord, y_coord, width, height, frame_count, class_id
-                )
-            )
-
-            cv2.rectangle(
-                frame,
-                (x_coord, y_coord),
-                (x_coord + width, y_coord + height),
-                (255, 0, 0),
-                2,
-            )
         car_detection_end_time = time.time()
         ############################
         # assign tracking box IDs
         ############################
         tracking_start_time = time.time()
-        for object_id, tracking_box_prev in tracking_objects.copy().items():
-            min_distance = math.inf
-            min_track_box = None
+        # Initialize ocsort tracker if not already done
 
-            # Find nearest bounding box
-            for tracking_box_cur in tracking_boxes_cur_frame:
-                distance = math.hypot(
-                    tracking_box_prev.x_coord - tracking_box_cur.x_coord,
-                    tracking_box_prev.y_coord - tracking_box_cur.y_coord,
+        # Update tracker with current detections
+        if len(dets) == 0:
+            dets = np.empty((0, 5))
+        tracks = tracker_ocsort.update(
+            np.array(dets),
+            img_info=frame.shape[:2],
+            img_size=(frame.shape[0], frame.shape[1]),
+        )
+
+        # clear and update tracking_objects with ocsort output
+        tracking_objects.clear()
+        for track in tracks:
+            x1, y1, x2, y2, track_id = track[:5].astype(int)
+            center_x = int((x1 + x2) / 2)
+            center_y = int((y1 + y2) / 2)
+            width = x2 - x1
+            height = y2 - y1
+            # find class_id for this track (fallback to CAR_CLASS_ID)
+            class_id = CAR_CLASS_ID
+            for box in boxes:
+                bx, by, bw, bh = box[0].astype(int)
+            if (
+                abs(bx - x1) < 3
+                and abs(by - y1) < 3
+                and abs(bw - width) < 3
+                and abs(bh - height) < 3
+            ):
+                class_id = int(box[1])
+                break
+            tracking_objects[track_id] = TrackingBox(
+                center_x, center_y, x1, y1, width, height, frame_count, class_id
+            )
+            if DEBUG_MODE:
+                cv2.rectangle(
+                    frame,
+                    (x1, y1),
+                    (x1 + width, y1 + height),
+                    (255, 0, 0),
+                    2,
                 )
-
-                # Only take bounding box if it is closest AND somewhat close to bounding
-                # box (closer than MAX_TRACKING_...)
-                if distance < min_distance and distance < MAX_TRACKING_MATCH_DISTANCE:
-                    min_distance = distance
-                    min_track_box = tracking_box_cur
-
-            if min_track_box is not None:
-                # Update tracking box for object if close box found
-                tracking_objects[object_id] = min_track_box
-                tracking_boxes_cur_frame.remove(min_track_box)
-            else:
-                # Remove IDs lost
-                tracking_objects.pop(object_id)
-
-        # Add new IDs found
-        for tracking_box_cur in tracking_boxes_cur_frame:
-            tracking_objects[track_id] = tracking_box_cur
-            track_id += 1
-
         ############################
         # scaling factor estimation
         ############################
@@ -298,7 +302,7 @@ def run(
                     # could extract more than x ground truth events
                     geo_model.scale_factor = 2 * (
                         offline_scaling_factor_estimation_from_least_squares(
-                            geo_model, ground_truth_events
+                            frame, geo_model, ground_truth_events
                         )
                     )
                     logging.info(
@@ -319,24 +323,28 @@ def run(
                 tracked_boxes[object_id].append(tracking_box)
         else:
             ############################
-            # track cars
+            # track objects and update tracked_object
             ############################
             for object_id, tracking_box in tracking_objects.items():
-                if object_id in tracked_cars:
-                    tracked_cars[object_id].tracked_boxes.append(tracking_box)
-                    tracked_cars[object_id].frames_seen += 1
-                    tracked_cars[object_id].frame_end += 1
+                if object_id in tracked_object:
+                    tracked_object[object_id].tracked_boxes.append(tracking_box)
+                    tracked_object[object_id].frames_seen += 1
+                    tracked_object[object_id].frame_end += 1
                 else:
-                    tracked_cars[object_id] = Car(
-                        [tracking_box], 1, frame_count, frame_count, 
-                        Direction.UNDEFINED, 0.0
+                    tracked_object[object_id] = MovingObject(
+                        [tracking_box],
+                        1,
+                        frame_count,
+                        frame_count,
+                        Direction.UNDEFINED,
+                        0.0,
                     )
             tracking_end_time = time.time()
             ############################
             # speed estimation
             ############################
             speed_estimation_start_time = time.time()
-            if frame_count >= fps:# and frame_count % sliding_window == 0:
+            if frame_count >= fps:  # and frame_count % sliding_window == 0:
                 # every x seconds
                 car_count_towards = 0
                 car_count_away = 0
@@ -346,13 +354,14 @@ def run(
                 total_speed_meta_appr_away = 0.0
                 ids_to_drop = []
 
-                for car_id, car in tracked_cars.items():
+                for car_id, car in tracked_object.items():
                     if car.frame_end >= frame_count - sliding_window:
                         if 9 < car.frames_seen < 750:
                             car.direction = calculate_car_direction(car)
                             car_first_box = car.tracked_boxes[0]
                             car_last_box = car.tracked_boxes[-1]
                             meters_moved = geo_model.get_distance_from_camera_points(
+                                frame,
                                 CameraPoint(
                                     car_first_box.frame_count,
                                     car_first_box.center_x,
@@ -364,39 +373,6 @@ def run(
                                     car_last_box.center_y,
                                 ),
                             )
-                            # TODO(SAID): remove debug
-
-                            # print(f"frame {frame_count} object {car_id} size in world points:", 
-                            #     geo_model.get_scaled_distance_from_camera_points(
-                            #         CameraPoint(
-                            #                 car_last_box.frame_count,
-                            #                 car_last_box.x_coord,
-                            #                 car_last_box.y_coord,
-                            #         ),
-                            #             CameraPoint(
-                            #                     car_last_box.frame_count,
-                            #                     car_last_box.x_coord + car_last_box.width,
-                            #                     car_last_box.y_coord,
-                            #         ))
-                            # )
-                            # point_1_in_meters = geo_model.get_scaled_world_point(
-                            #     CameraPoint(
-                            #         car_first_box.frame_count,
-                            #         car_first_box.center_x,
-                            #         car_first_box.center_y,
-                            #     )
-                            # )
-                            # point_2_in_meters = geo_model.get_scaled_world_point(
-                            #     CameraPoint(
-                            #             car_last_box.frame_count,
-                            #             car_last_box.center_x,
-                            #             car_last_box.center_y,
-                            #         )
-                            # )
-                            # print(
-                            #     f"frame {frame_count} obj ID {car_id}, meters moved: {meters_moved:.2f}, frames seen: {car.frames_seen}, ")
-                            # print(
-                            #     f"point 1 in meters: {point_1_in_meters}, point 2 in meters: {point_2_in_meters}")
                             if meters_moved <= 6:
                                 continue
 
@@ -405,6 +381,8 @@ def run(
                                 total_speed_towards += (meters_moved) / (
                                     car.frames_seen / fps
                                 )
+                                if total_speed_towards > SPEED_LIMIT:
+                                    total_speed_towards = SPEED_LIMIT
                                 total_speed_meta_appr_towards += (
                                     AVG_FRAME_COUNT / int(car.frames_seen)
                                 ) * SPEED_LIMIT
@@ -413,32 +391,37 @@ def run(
                                 total_speed_away += (meters_moved) / (
                                     car.frames_seen / fps
                                 )
+                                if total_speed_away > SPEED_LIMIT:
+                                    total_speed_away = SPEED_LIMIT
                                 total_speed_meta_appr_away += (
                                     AVG_FRAME_COUNT / int(car.frames_seen)
                                 ) * SPEED_LIMIT
                             # Write car ID and estimated speed on the car
-                            speed_kmh = round((meters_moved / (car.frames_seen / fps)) * 3.6, 2)
+                            speed_kmh = round(
+                                (meters_moved / (car.frames_seen / fps)) * 3.6, 2
+                            )
                             # print(f"obj ID {car_id}, speed {speed_kmh} km/h")
                             car.speed = speed_kmh
                             # TODO(SAID): remove debug
-                            cv2.putText(
-                                frame,
-                                f"ID: {car_id} V: {speed_kmh}",
-                                (
-                                    car.tracked_boxes[-1].center_x,
-                                    car.tracked_boxes[-1].center_y,
-                                ),
-                                0,
-                                1,
-                                (255, 0, 255),  # red color in BGR
-                                1,
-                            )
+                            if DEBUG_MODE:
+                                cv2.putText(
+                                    frame,
+                                    f"ID: {car_id} V: {speed_kmh}",
+                                    (
+                                        car.tracked_boxes[-1].center_x,
+                                        car.tracked_boxes[-1].center_y,
+                                    ),
+                                    0,
+                                    1,
+                                    (255, 0, 255),  # red color in BGR
+                                    1,
+                                )
                     else:
-                        # car is too old, drop from tracked_cars
+                        # car is too old, drop from tracked_object
                         ids_to_drop.append(car_id)
 
                 for car_id in ids_to_drop:
-                    del tracked_cars[car_id]
+                    del tracked_object[car_id]
 
                 if car_count_towards > 0:
                     avg_speed = round(
@@ -472,28 +455,42 @@ def run(
         # output text on video stream
         ############################
         # TODO(SAID): remove debug
-        if (is_calibrated and frame_count % 10 == 0):
+        if is_calibrated and frame_count % 10 == 0:
             print(f"submodule times for frame {frame_count}:")
-            print(f"  - car detection: {car_detection_end_time - car_detection_start_time:.2f}s")
+            print(
+                f"  - car detection: {car_detection_end_time - car_detection_start_time:.2f}s"
+            )
             print(f"  - tracking: {tracking_end_time - tracking_start_time:.2f}s")
-            print(f"  - speed estimation: {speed_estimation_end_time - speed_estimation_start_time:.2f}s")
+            print(
+                f"  - speed estimation: {speed_estimation_end_time - speed_estimation_start_time:.2f}s"
+            )
             print(f"  - total: {time.time() - frame_start_time:.2f}s")
 
         timestamp = frame_count / fps
-        cv2.putText(
-            frame,
-            f"Timestamp: {timestamp :.2f} s",
-            (7, 70),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            1,
-            text_color,
-            2,
-        )
-        cv2.putText(
-            frame, f"FPS: {fps}", (7, 100), cv2.FONT_HERSHEY_SIMPLEX, 1, text_color, 2
-        )
+        if DEBUG_MODE:
+            cv2.putText(
+                frame,
+                f"Timestamp: {timestamp :.2f} s",
+                (7, 70),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                1,
+                text_color,
+                2,
+            )
+            cv2.putText(
+                frame,
+                f"FPS: {fps}",
+                (7, 100),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                1,
+                text_color,
+                2,
+            )
 
-        cv2.imwrite(f"speed_estimation/frames_detected/frame_after_detection_{frame_count}.jpg", frame)
+            cv2.imwrite(
+                f"speed_estimation/frames_detected/frame_after_detection_{frame_count}.jpg",
+                frame,
+            )
 
         if frame_count % 50 == 0:
             print(
@@ -512,7 +509,11 @@ def run(
     return log_name
 
 
-@hydra.main(config_path="modules/depth_map/FlashDepth/configs/flashdepth", config_name="config", version_base="1.3")
+@hydra.main(
+    config_path="modules/depth_map/FlashDepth/configs/flashdepth",
+    config_name="config",
+    version_base="1.3",
+)
 def main(cfg: DictConfig):
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -540,7 +541,11 @@ def main(cfg: DictConfig):
     """Run the speed estimation pipeline."""
     max_frames = FPS * 60 * 20  # fps * sec * min
     hydra_cfg = HydraConfig.get()
-    cfg.config_dir = [path["path"] for path in hydra_cfg.runtime.config_sources if path["schema"] == "file"][0]
+    cfg.config_dir = [
+        path["path"]
+        for path in hydra_cfg.runtime.config_sources
+        if path["schema"] == "file"
+    ][0]
     print(args.session_path_local)
     print(args.path_to_video)
 
@@ -549,7 +554,7 @@ def main(cfg: DictConfig):
         args.session_path_local,
         FPS,
         max_frames=max_frames,
-        custom_object_detection=CUSTOM_OBJECT_DETECTION,
+        custom_object_detection=False,
         enable_visual=args.enable_visual,
         cfg=cfg,
     )

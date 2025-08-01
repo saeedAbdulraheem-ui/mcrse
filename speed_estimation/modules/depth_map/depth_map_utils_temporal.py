@@ -39,7 +39,7 @@ class DepthModelTemporal:
             self.model = torch.compile(model)
 
     
-    def predict_depth(self, frame_id: int) -> NDArray:
+    def predict_depth(self, frame_id: int, frame) -> NDArray:
         """Predict the depth map for the defined frame.
 
         Predict the depth map that estimates the depth in the frame. The estimated depth relative,
@@ -57,25 +57,25 @@ class DepthModelTemporal:
             # Depth map already predicted
             return self.memo[frame_id]
 
-        if len(self.memo) > 10:
-            # Take the mean over all depth maps
-            depth_maps: List[NDArray] = [
-                np.array(self.memo[frame]) for frame in self.memo
-            ]
-            # Ensure all depth maps have the same shape before stacking
-            min_shape = np.min([dm.shape for dm in depth_maps], axis=0)
-            depth_maps = [dm[:min_shape[0], :min_shape[1]] for dm in depth_maps]
-            return np.mean(np.stack(depth_maps, axis=0), axis=0)
+        # if len(self.memo) > 10:
+        #     # Take the mean over all depth maps
+        #     depth_maps: List[NDArray] = [
+        #         np.array(self.memo[frame]) for frame in self.memo
+        #     ]
+        #     # Ensure all depth maps have the same shape before stacking
+        #     min_shape = np.min([dm.shape for dm in depth_maps], axis=0)
+        #     depth_maps = [dm[:min_shape[0], :min_shape[1]] for dm in depth_maps]
+        #     return np.mean(np.stack(depth_maps, axis=0), axis=0)
 
         self.memo[frame_id] = self.load_depth_map(
-            self.data_dir, self.path_to_video, max_depth=1, frame_idx=frame_id
+            self.data_dir, self.path_to_video, max_depth=1, frame_idx=frame_id, frame=frame
         )
 
         # predict depth here
         return self.memo[frame_id]
 
 
-    def load_depth_map(self, current_folder: str, path_to_video: str, max_depth: int = 1, frame_idx: int = 0) -> NDArray:
+    def load_depth_map(self, current_folder: str, path_to_video: str, max_depth: int = 1, frame_idx: int = 0, frame = None) -> NDArray:
         """Load the depth map.
 
         This function loads the depth map for one specific frame. The output size of the depth map is
@@ -98,20 +98,20 @@ class DepthModelTemporal:
         @return:
             Returns the depth map of the specified frame.
         """
-        print("Depth map generation.")
-        scaled_image_name, original_shape = extract_frame(
-            path_to_video, current_folder, "frame_%d_scaled.jpg", frame_idx
-        )
-        print(f"Extracted scaled frame to {scaled_image_name}")
+        # print("Depth map generation.")
+        # scaled_image_name, original_shape = extract_frame(
+        #     path_to_video, current_folder, "frame_%d_scaled.jpg", frame_idx
+        # )
+        # print(f"Extracted scaled frame to {scaled_image_name}")
         
-        img_path = os.path.join(current_folder, scaled_image_name)
-        frame = cv2.imread(img_path)
+        # img_path = os.path.join(current_folder, scaled_image_name)
+        # frame = cv2.imread(img_path)
 
         return process_frame(
             frame=frame,
             frame_id=frame_idx,
             model=self.model,
-            dims = (original_shape[1], original_shape[0]),
+            dims = (frame.shape[1], frame.shape[0]),
             eval_args=self.config,
             )
 
@@ -226,7 +226,7 @@ def extract_frame(
         if frame_idx == frame_count:
             frame = resize_input(frame)
             path = os.path.join(output_folder, output_file % frame_idx)
-            cv2.imwrite(path, frame)
+            # cv2.imwrite(path, frame)
             return output_file % frame_idx, original_shape
 
         frame_count += 1

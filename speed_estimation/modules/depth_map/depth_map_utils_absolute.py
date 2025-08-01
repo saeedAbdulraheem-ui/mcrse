@@ -96,7 +96,7 @@ class DepthModelAbsolute:
                 # deprecated
                 # frame = resize_input(frame)
                 path = os.path.join(output_folder, output_file % frame_idx)
-                cv2.imwrite(path, frame)
+                # cv2.imwrite(path, frame)
                 return output_file % frame_idx, original_shape
 
             frame_count += 1

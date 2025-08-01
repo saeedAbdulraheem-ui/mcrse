@@ -31,11 +31,13 @@ def __load_log(log_path: str):
             line_dict = json.loads(line[10:])
             # Only append if avgSpeedTowards or avgSpeedAway are present
             if "avgSpeedTowards" in line_dict or "avgSpeedAway" in line_dict:
-                avg_speeds.append({
-                    "frameId": line_dict.get("frameId"),
-                    "avgSpeedTowards": line_dict.get("avgSpeedTowards"),
-                    "avgSpeedAway": line_dict.get("avgSpeedAway"),
-                })
+                avg_speeds.append(
+                    {
+                        "frameId": line_dict.get("frameId"),
+                        "avgSpeedTowards": line_dict.get("avgSpeedTowards"),
+                        "avgSpeedAway": line_dict.get("avgSpeedAway"),
+                    }
+                )
 
     video_id = cars_path.strip("/").split("/")[-1] if cars_path is not None else "-1"
     estimation = pd.DataFrame(avg_speeds)
@@ -75,7 +77,9 @@ def __generate_aligned_estimations(run_ids, loaded_avg_speeds, ground_truth):
     return truth, estimations, timestamps
 
 
-def plot_absolute_error(logs: List[str], save_file_path: str = "", ground_truth_log: str = None) -> None:
+def plot_absolute_error(
+    logs: List[str], save_file_path: str = "", ground_truth_log: str = None
+) -> None:
     """Plot the absolute error of the recorded speed.
 
     After the speed estimation is done, this function will plot the absolute error of the
@@ -102,15 +106,20 @@ def plot_absolute_error(logs: List[str], save_file_path: str = "", ground_truth_
             raise Exception("Can only evaluate logs of the same video in one call!")
 
     if ground_truth_log is None or not os.path.isdir(ground_truth_log):
-        raise ValueError("ground_truth_log must be provided and point to a directory containing .log files.")
+        raise ValueError(
+            "ground_truth_log must be provided and point to a directory containing .log files."
+        )
 
     # Find the most recent log file in the ground_truth_log directory
     log_files = [
-        f for f in os.listdir(ground_truth_log)
+        f
+        for f in os.listdir(ground_truth_log)
         if re.match(r"\d{8}-\d{6}_run_[a-f0-9]{10,}\.log", f)
     ]
     if not log_files:
-        raise FileNotFoundError("No ground truth log files found in the specified directory.")
+        raise FileNotFoundError(
+            "No ground truth log files found in the specified directory."
+        )
 
     log_files.sort(reverse=True)
     most_recent_log = os.path.join(ground_truth_log, log_files[0])
@@ -126,22 +135,30 @@ def plot_absolute_error(logs: List[str], save_file_path: str = "", ground_truth_
         # Merge truth_towards if columns exist
         if "frameId" in estimation.columns and "avgSpeedTowards" in estimation.columns:
             df_towards = df_towards.merge(
-                estimation[["frameId", "avgSpeedTowards"]].rename(columns={"avgSpeedTowards": f"{run_id}_towards"}),
+                estimation[["frameId", "avgSpeedTowards"]].rename(
+                    columns={"avgSpeedTowards": f"{run_id}_towards"}
+                ),
                 on="frameId",
-                how="outer"
+                how="outer",
             )
         else:
-            print(f"Warning: 'frameId' or 'avgSpeedTowards' not found in estimation for run_id {run_id}")
+            print(
+                f"Warning: 'frameId' or 'avgSpeedTowards' not found in estimation for run_id {run_id}"
+            )
         # Merge avgSpeedAway if columns exist
         if "frameId" in estimation.columns and "avgSpeedAway" in estimation.columns:
             print("Merging avgSpeedAway for run_id:", run_id)
             df_away = df_away.merge(
-                estimation[["frameId", "avgSpeedAway"]].rename(columns={"avgSpeedAway": f"{run_id}_away"}),
+                estimation[["frameId", "avgSpeedAway"]].rename(
+                    columns={"avgSpeedAway": f"{run_id}_away"}
+                ),
                 on="frameId",
-                how="outer"
+                how="outer",
             )
         else:
-            print(f"Warning: 'frameId' or 'avgSpeedAway' not found in estimation for run_id {run_id}")
+            print(
+                f"Warning: 'frameId' or 'avgSpeedAway' not found in estimation for run_id {run_id}"
+            )
 
     # Combine both DataFrames for further processing if needed
     df = pd.merge(df_towards, df_away, on="frameId", how="outer")
@@ -172,18 +189,44 @@ def plot_absolute_error(logs: List[str], save_file_path: str = "", ground_truth_
     df_error_away = df[run_id_away_cols].sub(df["avgSpeedAway"], axis=0)
 
     # Plot mean absolute error for both directions
-    fig_towards = px.line(
-        pd.concat([df[["frameId"]], df_error_towards], axis=1),
-        x="frameId", y=run_id_towards_cols, title=f"Mean Absolute Error Towards ({cars_path})"
+    # Rename columns for plotting
+    df_plot_towards = pd.concat([df[["frameId"]], df_error_towards], axis=1).rename(
+        columns={
+            run_id_towards_cols[0]: "estimate toward",
+            "avgSpeedTowards": "ground truth toward",
+        }
     )
+    df_plot_towards["ground truth toward"] = 0  # error vs ground truth is always 0
+
+    fig_towards = px.line(
+        df_plot_towards,
+        x="frameId",
+        y=["ground truth toward", "estimate toward"],
+        title=f"Mean Absolute Error Towards ({cars_path})",
+    )
+
+    df_plot_away = pd.concat([df[["frameId"]], df_error_away], axis=1).rename(
+        columns={
+            run_id_away_cols[0]: "estimate away",
+            "avgSpeedAway": "ground truth away",
+        }
+    )
+    df_plot_away["ground truth away"] = 0
+
     fig_away = px.line(
-        pd.concat([df[["frameId"]], df_error_away], axis=1),
-        x="frameId", y=run_id_away_cols, title=f"Mean Absolute Error Away ({cars_path})"
+        df_plot_away,
+        x="frameId",
+        y=["ground truth away", "estimate away"],
+        title=f"Mean Absolute Error Away ({cars_path})",
     )
 
     if save_file_path:
-        fig_towards.write_image(file=os.path.join(save_file_path, f"{video_id}_{id}_mae_towards.pdf"))
-        fig_away.write_image(file=os.path.join(save_file_path, f"{video_id}_{id}_mae_away.pdf"))
+        fig_towards.write_image(
+            file=os.path.join(save_file_path, f"{video_id}_{id}_mae_towards.pdf")
+        )
+        fig_away.write_image(
+            file=os.path.join(save_file_path, f"{video_id}_{id}_mae_away.pdf")
+        )
     else:
         fig_towards.show()
         fig_away.show()

@@ -6,17 +6,24 @@ from speed_estimation.modules.depth_map.depth_map_utils import DepthModel
 from numpy.typing import NDArray
 from scipy.linalg import norm
 from scipy.spatial import distance
-from speed_estimation.utils.speed_estimation import Line, Point, TrackingBox, get_intersection
+from speed_estimation.utils.speed_estimation import (
+    Line,
+    Point,
+    TrackingBox,
+    get_intersection,
+)
 
 # Mapping from YOLO class IDs to average object lengths in meters
 # Mapping from YOLOv4 class IDs to average horizontal object lengths in meters
 # (indices based on YOLOv4: 0=person, 1=bicycle, 2=car, 3=motorbike)
 YOLO_CLASS_ID_TO_AVG_LENGTH = {
-    0: 0.5,   # person (average horizontal width)
-    1: 1.7,   # bicycle (horizontal length)
-    2: 6.0,   # car (horizontal length)
-    3: 2.1,   # motorbike (horizontal length)
+    0: 0.5,  # person (average horizontal width)
+    # 1: 1.7,  # bicycle (horizontal length)
+    2: 5.5,  # car (horizontal length)
+    # 3: 2.1,  # motorbike (horizontal length)
 }
+
+
 @dataclass
 class CameraPoint:
     """A Camera Point in the frame.
@@ -123,12 +130,16 @@ class GeometricModel:
             The depth model that has to be applied to predict the depth of the whole frame.
         """
         self.depth_model = depth_model
-        self.focal_length: float = 100.0
-        self.scaling_x: int = 1
-        self.scaling_y: int = 1
-        self.center_x: int = 1
-        self.center_y: int = 1
-        self.scale_factor: float = 1
+        # Calibration parameters from KITTI (example: K_00, S_00)
+        # S_00: 1.392000e+03 5.120000e+02
+        # K_00: 9.842439e+02 0.000000e+00 6.900000e+02 0.000000e+00 9.808141e+02 2.331966e+02 0.000000e+00 0.000000e+00 1.000000e+00
+        # Use K_00 for focal length and principal point
+        self.focal_length: float = 984.2439  # fx from K_00
+        self.scaling_x: float = 1.0 / 984.2439  # 1/fx
+        self.scaling_y: float = 1.0 / 980.8141  # 1/fy from K_00
+        self.center_x: float = 690.0  # cx from K_00
+        self.center_y: float = 233.1966  # cy from K_00
+        self.scale_factor: float = 1.0
 
     def set_normalization_axes(self, center_x: int, center_y: int) -> None:
         """Set the normalization axis.
@@ -142,7 +153,7 @@ class GeometricModel:
         self.center_y = center_y
 
     def get_unscaled_distance_from_camera_points(
-        self, cp1: CameraPoint, cp2: CameraPoint
+        self, frame, cp1: CameraPoint, cp2: CameraPoint
     ) -> float:
         """Get the unscaled distance between two two-dimensional CameraPoints.
 
@@ -153,15 +164,15 @@ class GeometricModel:
         @return:
             Returns the unscaled distance between those CameraPoints.
         """
-        unscaled_wp1 = self.__get_unscaled_world_point(cp1)
-        unscaled_wp2 = self.__get_unscaled_world_point(cp2)
+        unscaled_wp1 = self.__get_unscaled_world_point(frame, cp1)
+        unscaled_wp2 = self.__get_unscaled_world_point(frame, cp2)
 
         return self.__calculate_distance_between_world_points(
             unscaled_wp1, unscaled_wp2
         )
 
     def get_distance_from_camera_points(
-        self, cp1: CameraPoint, cp2: CameraPoint
+        self, frame, cp1: CameraPoint, cp2: CameraPoint
     ) -> float:
         """Get the scaled distance between two two-dimensional CameraPoints in meters.
 
@@ -173,9 +184,9 @@ class GeometricModel:
             Returns the scaled distance between those CameraPoints in meters.
         """
         return self.scale_factor * self.__get_unscaled_distance_from_camera_points(
-            cp1, cp2
+            frame, cp1, cp2
         )
-    
+
     def get_scaled_distance_from_camera_points(
         self, cp1: CameraPoint, cp2: CameraPoint
     ) -> float:
@@ -189,8 +200,8 @@ class GeometricModel:
             Returns the scaled distance between those CameraPoints in meters.
         """
         return self.__get_scaled_distance_from_camera_points(cp1, cp2)
-    
-    def __get_unscaled_world_point(self, cp: CameraPoint) -> WorldPoint:
+
+    def __get_unscaled_world_point(self, frame, cp: CameraPoint) -> WorldPoint:
         normalised_u = self.scaling_x * (cp.x_coord - self.center_x)
         normalised_v = self.scaling_y * (cp.y_coord - self.center_y)
 
@@ -199,7 +210,7 @@ class GeometricModel:
             x=self.focal_length, y=normalised_u, z=normalised_v
         )
 
-        result = self.depth_model.predict_depth(cp.frame)
+        result = self.depth_model.predict_depth(cp.frame, frame)
         if result is None:
             raise ValueError(f"Depth model returned None for frame {cp.frame}")
         depth_map = result[0] if isinstance(result, tuple) else result
@@ -215,7 +226,7 @@ class GeometricModel:
         # relabeling again for the world reference system
         return WorldPoint(frame=cp.frame, x_coord=y, y_coord=z, z_coord=x)
 
-    def __get_scaled_world_point(self, cp: CameraPoint) -> WorldPoint:
+    def __get_scaled_world_point(self, frame, cp: CameraPoint) -> WorldPoint:
         """
         Computes the scaled world coordinates of a given camera point using depth estimation and camera intrinsics.
 
@@ -232,13 +243,13 @@ class GeometricModel:
             - Uses predicted depth to scale the spherical coordinates and converts back to cartesian.
             - Returns the world point with relabeled axes to match the world reference system.
         """
-        depth_map, preds  = self.depth_model.predict_depth(cp.frame)
-        #update camera intrinsics from preds
+        depth_map, preds = self.depth_model.predict_depth(frame, cp.frame)
+        # update camera intrinsics from preds
         intrinsics = preds["intrinsics"]
         self.focal_length = float(intrinsics[0, 0, 0])
-        self.scaling_x = 1.0 #/ float(intrinsics[0, 0, 0])
-        self.scaling_y = 1.0 #/ float(intrinsics[0, 1, 1])
-        
+        self.scaling_x = 1.0 / float(intrinsics[0, 0, 0])
+        self.scaling_y = 1.0 / float(intrinsics[0, 1, 1])
+
         normalised_u = self.scaling_x * (cp.x_coord - self.center_x)
         normalised_v = self.scaling_y * (cp.y_coord - self.center_y)
 
@@ -258,8 +269,8 @@ class GeometricModel:
 
         # relabeling again for the world reference system
         return WorldPoint(frame=cp.frame, x_coord=y, y_coord=z, z_coord=x)
-    
-    def get_scaled_world_point(self, cp: CameraPoint) -> WorldPoint:
+
+    def get_scaled_world_point(self, frame, cp: CameraPoint) -> WorldPoint:
         """
         Computes the scaled world coordinates of a given camera point using depth estimation and camera intrinsics.
 
@@ -276,7 +287,7 @@ class GeometricModel:
             - Uses predicted depth to scale the spherical coordinates and converts back to cartesian.
             - Returns the world point with relabeled axes to match the world reference system.
         """
-        depth_map, preds  = self.depth_model.predict_depth(cp.frame)
+        depth_map, preds = self.depth_model.predict_depth(frame, cp.frame)
 
         # Write the depth map to an image file for debugging
         # Normalize depth map to 0-255 and apply a colormap for better visualization
@@ -286,12 +297,12 @@ class GeometricModel:
         # debug_depth_img_color = cv2.applyColorMap(debug_depth_img, cv2.COLORMAP_JET)
         # cv2.imwrite(f"debug/debug_depth_frame_{cp.frame}.png", debug_depth_img_color)
 
-        #update camera intrinsics from preds
+        # update camera intrinsics from preds
         intrinsics = preds["intrinsics"]
         self.focal_length = float(intrinsics[0, 0, 0])
-        self.scaling_x = 1.0 #/ float(intrinsics[0, 0, 0])
-        self.scaling_y = 1.0 #/ float(intrinsics[0, 1, 1])
-        
+        self.scaling_x = 1.0  # / float(intrinsics[0, 0, 0])
+        self.scaling_y = 1.0  # / float(intrinsics[0, 1, 1])
+
         normalised_u = self.scaling_x * (cp.x_coord - self.center_x)
         normalised_v = self.scaling_y * (cp.y_coord - self.center_y)
 
@@ -370,25 +381,24 @@ class GeometricModel:
         return norm(wp1.coords() - wp2.coords())
 
     def __get_unscaled_distance_from_camera_points(
-        self, cp1: CameraPoint, cp2: CameraPoint
+        self, frame, cp1: CameraPoint, cp2: CameraPoint
     ):
-        unscaled_wp1 = self.__get_unscaled_world_point(cp1)
-        unscaled_wp2 = self.__get_unscaled_world_point(cp2)
+        unscaled_wp1 = self.__get_unscaled_world_point(frame, cp1)
+        unscaled_wp2 = self.__get_unscaled_world_point(frame, cp2)
         return self.__calculate_distance_between_world_points(
             unscaled_wp1, unscaled_wp2
         )
-    
+
     def __get_scaled_distance_from_camera_points(
         self, cp1: CameraPoint, cp2: CameraPoint
     ):
         scaled_wp1 = self.__get_scaled_world_point(cp1)
         scaled_wp2 = self.__get_scaled_world_point(cp2)
-        return self.__calculate_distance_between_world_points(
-            scaled_wp1, scaled_wp2
-        )
+        return self.__calculate_distance_between_world_points(scaled_wp1, scaled_wp2)
 
 
 def offline_scaling_factor_estimation_from_least_squares(
+    frame,
     geometric_model: GeometricModel,
     ground_truths: List,
 ) -> float:
@@ -414,7 +424,7 @@ def offline_scaling_factor_estimation_from_least_squares(
         cp1 = CameraPoint(frame=f1, x_coord=u1, y_coord=v1)
         cp2 = CameraPoint(frame=f2, x_coord=u2, y_coord=v2)
         unscaled_predictions.append(
-            geometric_model.get_unscaled_distance_from_camera_points(cp1, cp2)
+            geometric_model.get_unscaled_distance_from_camera_points(frame, cp1, cp2)
         )
         labels.append(distance)
 
@@ -467,7 +477,7 @@ def __online_scaling_factor_estimation_from_least_squares(stream_of_events):
 
 
 def get_ground_truth_events(
-    tracking_boxes: Dict[int, List[TrackingBox]]
+    tracking_boxes: Dict[int, List[TrackingBox]],
 ) -> List[GroundTruthEvent]:
     """Get ground truth events to calculate the scaling factor.
 
