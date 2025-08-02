@@ -11,6 +11,7 @@ import time
 
 class DepthModelAbsolute:
     """This class holds the depth map generation."""
+
     def __init__(self, data_dir: str, path_to_video: str) -> None:
         """Create an instance of DepthModel.
 
@@ -25,11 +26,15 @@ class DepthModelAbsolute:
         self.data_dir = data_dir
         self.memo: dict[int, NDArray] = {}
         self.pred_memo: dict[int, dict] = {}
-        from speed_estimation.modules.depth_map.Unidepth.unidepth.models import UniDepthV2
-        model = UniDepthV2.from_pretrained("lpiccinelli/unidepth-v2-vitS14") # load a lighter model
+        from speed_estimation.modules.depth_map.Unidepth.unidepth.models import (
+            UniDepthV2,
+        )
+
+        model = UniDepthV2.from_pretrained(
+            "lpiccinelli/unidepth-v2-vitl14"
+        )  # load a lighter model
         model.eval()
         self.model = model.to("cuda")
-
 
     def predict_depth(self, frame_id: int):
         """Predict the absolute depth map for the defined frame.
@@ -64,8 +69,8 @@ class DepthModelAbsolute:
         # predict depth here
         return self.memo[frame_id], self.pred_memo[frame_id]
 
-    def extract_frame(self,
-        video_path: str, output_folder: str, output_file: str, frame_idx: int = 0
+    def extract_frame(
+        self, video_path: str, output_folder: str, output_file: str, frame_idx: int = 0
     ) -> Tuple[str, Tuple[int, int, int]]:
         """Extract a specific frame from the video.
 
@@ -101,8 +106,8 @@ class DepthModelAbsolute:
 
             frame_count += 1
 
-
-    def load_depth(self, current_folder: str, path_to_video: str, frame_idx: int = 0
+    def load_depth(
+        self, current_folder: str, path_to_video: str, frame_idx: int = 0
     ) -> NDArray:
         """Load the absolute depth map.
 
@@ -151,7 +156,9 @@ class DepthModelAbsolute:
         # img_resized = resize_input(img_rgb)  # Ensure correct input size
 
         # Convert to tensor and normalize
-        img_tensor = torch.from_numpy(np.array(Image.open(img_path))).permute(2, 0, 1).to(device)
+        img_tensor = (
+            torch.from_numpy(np.array(Image.open(img_path))).permute(2, 0, 1).to(device)
+        )
 
         # Inference
         with torch.no_grad():
@@ -173,4 +180,3 @@ class DepthModelAbsolute:
         torch.cuda.empty_cache()
 
         return depth_map, output
-    

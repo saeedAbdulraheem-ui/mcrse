@@ -40,8 +40,8 @@ from tqdm import tqdm
 import hydra
 
 from speed_estimation.get_fps import get_fps
-from speed_estimation.modules.depth_map.depth_map_utils_temporal import (
-    DepthModelTemporal,
+from speed_estimation.modules.depth_map.depth_map_utils_absolute import (
+    DepthModelAbsolute,
 )
 from speed_estimation.modules.object_detection.yolov4.object_detection import (
     ObjectDetection as ObjectDetectionYoloV4,
@@ -175,10 +175,10 @@ def run(
         det_thresh=MAX_TRACKING_MATCH_THRESHOLD, max_age=15, min_hits=2
     )
     # tracked_boxes: Dict[int, List[TrackingBox]] = defaultdict(list)
-    tracked_boxes: Dict[int, List[TrackingBox]] = defaultdict(list)
-    depth_model = DepthModelTemporal(data_dir, path_to_video, cfg)
+    # tracked_boxes: Dict[int, List[TrackingBox]] = defaultdict(list)
+    depth_model = DepthModelAbsolute(data_dir, path_to_video, cfg)
     geo_model = GeometricModel(depth_model)
-    is_calibrated = False
+    # is_calibrated = False
     text_color = (255, 255, 255)
 
     # for shake_detection
@@ -294,214 +294,208 @@ def run(
         ############################
         # scaling factor estimation
         ############################
-        if not is_calibrated:
-            if len(tracked_boxes) >= NUM_TRACKED_CARS:
-                # more than x cars were tracked
-                ground_truth_events = get_ground_truth_events(tracked_boxes)
-                if len(ground_truth_events) >= NUM_GT_EVENTS:
-                    # could extract more than x ground truth events
-                    geo_model.scale_factor = 2 * (
-                        offline_scaling_factor_estimation_from_least_squares(
-                            frame, geo_model, ground_truth_events
+        # if not is_calibrated:
+        #     if len(tracked_boxes) >= NUM_TRACKED_CARS:
+        #         # more than x cars were tracked
+        #         ground_truth_events = get_ground_truth_events(tracked_boxes)
+        #         if len(ground_truth_events) >= NUM_GT_EVENTS:
+        #             # could extract more than x ground truth events
+        #             geo_model.scale_factor = 2 * (
+        #                 offline_scaling_factor_estimation_from_least_squares(
+        #                     frame, geo_model, ground_truth_events
+        #                 )
+        #             )
+        #             logging.info(
+        #                 "Is calibrated: scale_factor: %d", geo_model.scale_factor
+        #             )
+        #             print(
+        #                 f"Is calibrated: scale_factor: {geo_model.scale_factor}",
+        #                 flush=True,
+        #             )
+        #             is_calibrated = True
+        #             object_detection = ObjectDetectionYoloV4()
+        #             # todo:make this more robust, resets video when calibration is done
+        #             input_video.set(cv2.CAP_PROP_POS_FRAMES, 0)
+        #             frame_count = 0
+        #             continue
+
+        #     for object_id, tracking_box in tracking_objects.items():
+        #         tracked_boxes[object_id].append(tracking_box)
+        # else:
+        ############################
+        # track objects and update tracked_object
+        ############################
+        for object_id, tracking_box in tracking_objects.items():
+            if object_id in tracked_object:
+                tracked_object[object_id].tracked_boxes.append(tracking_box)
+                tracked_object[object_id].frames_seen += 1
+                tracked_object[object_id].frame_end += 1
+            else:
+                tracked_object[object_id] = MovingObject(
+                    [tracking_box],
+                    1,
+                    frame_count,
+                    frame_count,
+                    Direction.UNDEFINED,
+                    0.0,
+                )
+        tracking_end_time = time.time()
+        ############################
+        # speed estimation
+        ############################
+        speed_estimation_start_time = time.time()
+        if frame_count >= fps:  # and frame_count % sliding_window == 0:
+            # every x seconds
+            car_count_towards = 0
+            car_count_away = 0
+            total_speed_towards = 0
+            total_speed_away = 0
+            total_speed_meta_appr_towards = 0.0
+            total_speed_meta_appr_away = 0.0
+            ids_to_drop = []
+
+            for car_id, car in tracked_object.items():
+                if car.frame_end >= frame_count - sliding_window:
+                    if 9 < car.frames_seen < 750:
+                        car.direction = calculate_car_direction(car)
+                        car_first_box = car.tracked_boxes[0]
+                        car_last_box = car.tracked_boxes[-1]
+                        meters_moved = geo_model.get_scaled_distance_from_camera_points(
+                            frame,
+                            CameraPoint(
+                                car_first_box.frame_count,
+                                car_first_box.center_x,
+                                car_first_box.center_y,
+                            ),
+                            CameraPoint(
+                                car_last_box.frame_count,
+                                car_last_box.center_x,
+                                car_last_box.center_y,
+                            ),
                         )
-                    )
-                    logging.info(
-                        "Is calibrated: scale_factor: %d", geo_model.scale_factor
-                    )
-                    print(
-                        f"Is calibrated: scale_factor: {geo_model.scale_factor}",
-                        flush=True,
-                    )
-                    is_calibrated = True
-                    object_detection = ObjectDetectionYoloV4()
-                    # todo:make this more robust, resets video when calibration is done
-                    input_video.set(cv2.CAP_PROP_POS_FRAMES, 0)
-                    frame_count = 0
-                    continue
+                        if meters_moved <= 6:
+                            continue
 
-            for object_id, tracking_box in tracking_objects.items():
-                tracked_boxes[object_id].append(tracking_box)
-        else:
-            ############################
-            # track objects and update tracked_object
-            ############################
-            for object_id, tracking_box in tracking_objects.items():
-                if object_id in tracked_object:
-                    tracked_object[object_id].tracked_boxes.append(tracking_box)
-                    tracked_object[object_id].frames_seen += 1
-                    tracked_object[object_id].frame_end += 1
-                else:
-                    tracked_object[object_id] = MovingObject(
-                        [tracking_box],
-                        1,
-                        frame_count,
-                        frame_count,
-                        Direction.UNDEFINED,
-                        0.0,
-                    )
-            tracking_end_time = time.time()
-            ############################
-            # speed estimation
-            ############################
-            speed_estimation_start_time = time.time()
-            if frame_count >= fps:  # and frame_count % sliding_window == 0:
-                # every x seconds
-                car_count_towards = 0
-                car_count_away = 0
-                total_speed_towards = 0
-                total_speed_away = 0
-                total_speed_meta_appr_towards = 0.0
-                total_speed_meta_appr_away = 0.0
-                ids_to_drop = []
-
-                for car_id, car in tracked_object.items():
-                    if car.frame_end >= frame_count - sliding_window:
-                        if 9 < car.frames_seen < 750:
-                            car.direction = calculate_car_direction(car)
-                            car_first_box = car.tracked_boxes[0]
-                            car_last_box = car.tracked_boxes[-1]
-                            meters_moved = geo_model.get_distance_from_camera_points(
+                        if car.direction == Direction.TOWARDS:
+                            car_count_towards += 1
+                            total_speed_towards += (meters_moved) / (
+                                car.frames_seen / fps
+                            )
+                            if total_speed_towards > SPEED_LIMIT:
+                                total_speed_towards = SPEED_LIMIT
+                            total_speed_meta_appr_towards += (
+                                AVG_FRAME_COUNT / int(car.frames_seen)
+                            ) * SPEED_LIMIT
+                        else:
+                            car_count_away += 1
+                            total_speed_away += (meters_moved) / (car.frames_seen / fps)
+                            if total_speed_away > SPEED_LIMIT:
+                                total_speed_away = SPEED_LIMIT
+                            total_speed_meta_appr_away += (
+                                AVG_FRAME_COUNT / int(car.frames_seen)
+                            ) * SPEED_LIMIT
+                        # Write car ID and estimated speed on the car
+                        speed_kmh = round(
+                            (meters_moved / (car.frames_seen / fps)) * 3.6, 2
+                        )
+                        # print(f"obj ID {car_id}, speed {speed_kmh} km/h")
+                        car.speed = speed_kmh
+                        # TODO(SAID): remove debug
+                        if DEBUG_MODE:
+                            cv2.putText(
                                 frame,
-                                CameraPoint(
-                                    car_first_box.frame_count,
-                                    car_first_box.center_x,
-                                    car_first_box.center_y,
+                                f"ID: {car_id} V: {speed_kmh}",
+                                (
+                                    car.tracked_boxes[-1].center_x,
+                                    car.tracked_boxes[-1].center_y,
                                 ),
-                                CameraPoint(
-                                    car_last_box.frame_count,
-                                    car_last_box.center_x,
-                                    car_last_box.center_y,
-                                ),
+                                0,
+                                1,
+                                (255, 0, 255),  # red color in BGR
+                                1,
                             )
-                            if meters_moved <= 6:
-                                continue
+                else:
+                    # car is too old, drop from tracked_object
+                    ids_to_drop.append(car_id)
 
-                            if car.direction == Direction.TOWARDS:
-                                car_count_towards += 1
-                                total_speed_towards += (meters_moved) / (
-                                    car.frames_seen / fps
-                                )
-                                if total_speed_towards > SPEED_LIMIT:
-                                    total_speed_towards = SPEED_LIMIT
-                                total_speed_meta_appr_towards += (
-                                    AVG_FRAME_COUNT / int(car.frames_seen)
-                                ) * SPEED_LIMIT
-                            else:
-                                car_count_away += 1
-                                total_speed_away += (meters_moved) / (
-                                    car.frames_seen / fps
-                                )
-                                if total_speed_away > SPEED_LIMIT:
-                                    total_speed_away = SPEED_LIMIT
-                                total_speed_meta_appr_away += (
-                                    AVG_FRAME_COUNT / int(car.frames_seen)
-                                ) * SPEED_LIMIT
-                            # Write car ID and estimated speed on the car
-                            speed_kmh = round(
-                                (meters_moved / (car.frames_seen / fps)) * 3.6, 2
-                            )
-                            # print(f"obj ID {car_id}, speed {speed_kmh} km/h")
-                            car.speed = speed_kmh
-                            # TODO(SAID): remove debug
-                            if DEBUG_MODE:
-                                cv2.putText(
-                                    frame,
-                                    f"ID: {car_id} V: {speed_kmh}",
-                                    (
-                                        car.tracked_boxes[-1].center_x,
-                                        car.tracked_boxes[-1].center_y,
-                                    ),
-                                    0,
-                                    1,
-                                    (255, 0, 255),  # red color in BGR
-                                    1,
-                                )
-                    else:
-                        # car is too old, drop from tracked_object
-                        ids_to_drop.append(car_id)
+            for car_id in ids_to_drop:
+                del tracked_object[car_id]
 
-                for car_id in ids_to_drop:
-                    del tracked_object[car_id]
+            if car_count_towards > 0:
+                avg_speed = round((total_speed_towards / car_count_towards) * 3.6, 2)
+                logging.info(
+                    json.dumps(dict(frameId=frame_count, avgSpeedTowards=avg_speed))
+                )
 
-                if car_count_towards > 0:
-                    avg_speed = round(
-                        (total_speed_towards / car_count_towards) * 3.6, 2
-                    )
-                    logging.info(
-                        json.dumps(dict(frameId=frame_count, avgSpeedTowards=avg_speed))
-                    )
+            if car_count_away > 0:
+                avg_speed = round((total_speed_away / car_count_away) * 3.6, 2)
+                cv2.putText(
+                    frame,
+                    f"Avg Speed: {avg_speed} km/h",
+                    (7, 130),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    1,
+                    text_color,
+                    2,
+                )
+                # print(f"Average speed away: {avg_speed} km/h")
+                # print(
+                #     f"Average META speed away: "
+                #     f"{(total_speed_meta_appr_away / car_count_away)} km/h"
+                # )
+                logging.info(
+                    json.dumps(dict(frameId=frame_count, avgSpeedAway=avg_speed))
+                )
+    speed_estimation_end_time = time.time()
+    ############################
+    # output text on video stream
+    ############################
+    # TODO(SAID): remove debug
+    if frame_count % 10 == 0:
+        print(f"submodule times for frame {frame_count}:")
+        print(
+            f"  - car detection: {car_detection_end_time - car_detection_start_time:.2f}s"
+        )
+        print(f"  - tracking: {tracking_end_time - tracking_start_time:.2f}s")
+        print(
+            f"  - speed estimation: {speed_estimation_end_time - speed_estimation_start_time:.2f}s"
+        )
+        print(f"  - total: {time.time() - frame_start_time:.2f}s")
 
-                if car_count_away > 0:
-                    avg_speed = round((total_speed_away / car_count_away) * 3.6, 2)
-                    cv2.putText(
-                        frame,
-                        f"Avg Speed: {avg_speed} km/h",
-                        (7, 130),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        1,
-                        text_color,
-                        2,
-                    )
-                    # print(f"Average speed away: {avg_speed} km/h")
-                    # print(
-                    #     f"Average META speed away: "
-                    #     f"{(total_speed_meta_appr_away / car_count_away)} km/h"
-                    # )
-                    logging.info(
-                        json.dumps(dict(frameId=frame_count, avgSpeedAway=avg_speed))
-                    )
-        speed_estimation_end_time = time.time()
-        ############################
-        # output text on video stream
-        ############################
-        # TODO(SAID): remove debug
-        if is_calibrated and frame_count % 10 == 0:
-            print(f"submodule times for frame {frame_count}:")
-            print(
-                f"  - car detection: {car_detection_end_time - car_detection_start_time:.2f}s"
-            )
-            print(f"  - tracking: {tracking_end_time - tracking_start_time:.2f}s")
-            print(
-                f"  - speed estimation: {speed_estimation_end_time - speed_estimation_start_time:.2f}s"
-            )
-            print(f"  - total: {time.time() - frame_start_time:.2f}s")
+    timestamp = frame_count / fps
+    if DEBUG_MODE:
+        cv2.putText(
+            frame,
+            f"Timestamp: {timestamp :.2f} s",
+            (7, 70),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            1,
+            text_color,
+            2,
+        )
+        cv2.putText(
+            frame,
+            f"FPS: {fps}",
+            (7, 100),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            1,
+            text_color,
+            2,
+        )
 
-        timestamp = frame_count / fps
-        if DEBUG_MODE:
-            cv2.putText(
-                frame,
-                f"Timestamp: {timestamp :.2f} s",
-                (7, 70),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                1,
-                text_color,
-                2,
-            )
-            cv2.putText(
-                frame,
-                f"FPS: {fps}",
-                (7, 100),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                1,
-                text_color,
-                2,
-            )
+        cv2.imwrite(
+            f"speed_estimation/frames_detected/frame_after_detection_{frame_count}.jpg",
+            frame,
+        )
 
-            cv2.imwrite(
-                f"speed_estimation/frames_detected/frame_after_detection_{frame_count}.jpg",
-                frame,
-            )
-
-        if frame_count % 50 == 0:
-            print(
-                f"Frame no. {frame_count} time since start: {(time.time() - start):.2f}s"
-            )
-        frame_count += 1
-        if max_frames != 0 and frame_count >= max_frames:
-            if not is_calibrated:
-                log_name = ""
-            print("Max frames reached, stopping speed estimation.")
-            break
+    if frame_count % 50 == 0:
+        print(f"Frame no. {frame_count} time since start: {(time.time() - start):.2f}s")
+    frame_count += 1
+    # if max_frames != 0 and frame_count >= max_frames:
+    #     if not is_calibrated:
+    #         log_name = ""
+    #     print("Max frames reached, stopping speed estimation.")
+    #     break
 
     input_video.release()
     cv2.destroyAllWindows()
