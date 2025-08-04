@@ -31,12 +31,12 @@ class DepthModelAbsolute:
         )
 
         model = UniDepthV2.from_pretrained(
-            "lpiccinelli/unidepth-v2-vitl14"
+            "lpiccinelli/unidepth-v2-vits14"
         )  # load a lighter model
         model.eval()
         self.model = model.to("cuda")
 
-    def predict_depth(self, frame_id: int):
+    def predict_depth(self, frame, frame_id: int):
         """Predict the absolute depth map for the defined frame.
 
         Predict the depth map that estimates the absolute depth (in meters) in the frame.
@@ -63,7 +63,7 @@ class DepthModelAbsolute:
                 del self.pred_memo[oldest_key]
 
         self.memo[frame_id], self.pred_memo[frame_id] = self.load_depth(
-            self.data_dir, self.path_to_video, frame_idx=frame_id
+            self.data_dir, self.path_to_video, frame=frame, frame_idx=frame_id
         )
 
         # predict depth here
@@ -107,7 +107,7 @@ class DepthModelAbsolute:
             frame_count += 1
 
     def load_depth(
-        self, current_folder: str, path_to_video: str, frame_idx: int = 0
+        self, current_folder: str, path_to_video: str, frame, frame_idx: int = 0
     ) -> NDArray:
         """Load the absolute depth map.
 
@@ -128,15 +128,15 @@ class DepthModelAbsolute:
         @return:
             Returns the absolute depth map (in meters) of the specified frame.
         """
-        print("Depth map generation.")
-        scaled_image_name, original_shape = self.extract_frame(
-            path_to_video, current_folder, "frame_%d_scaled.jpg", frame_idx
-        )
-        print(f"Extracted scaled frame to {scaled_image_name}")
+        # print("Depth map generation.")
+        # scaled_image_name, original_shape = self.extract_frame(
+        #     path_to_video, current_folder, "frame_%d_scaled.jpg", frame_idx
+        # )
+        # print(f"Extracted scaled frame to {scaled_image_name}")
         # generate_depth now returns absolute depth in meters
-        return self.generate_depth(current_folder, scaled_image_name)
+        return self.generate_depth(frame)
 
-    def generate_depth(self, data_folder: str, file_name: str, device: str = "cuda"):
+    def generate_depth(self, frame, device: str = "cuda"):
         """
         Generate a depth map using UniDepthV2.
 
@@ -150,15 +150,16 @@ class DepthModelAbsolute:
         """
 
         # Load and preprocess image
-        img_path = os.path.join(data_folder, file_name)
+        # img_path = os.path.join(data_folder, file_name)
         # img = cv2.imread(img_path)
         # img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         # img_resized = resize_input(img_rgb)  # Ensure correct input size
 
         # Convert to tensor and normalize
-        img_tensor = (
-            torch.from_numpy(np.array(Image.open(img_path))).permute(2, 0, 1).to(device)
-        )
+        # img_tensor = (
+        #     torch.from_numpy(np.array(Image.open(img_path))).permute(2, 0, 1).to(device)
+        # )
+        img_tensor = torch.from_numpy(np.array(frame)).permute(2, 0, 1).to(device)
 
         # Inference
         with torch.no_grad():

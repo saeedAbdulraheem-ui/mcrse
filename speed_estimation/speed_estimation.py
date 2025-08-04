@@ -176,7 +176,7 @@ def run(
     )
     # tracked_boxes: Dict[int, List[TrackingBox]] = defaultdict(list)
     # tracked_boxes: Dict[int, List[TrackingBox]] = defaultdict(list)
-    depth_model = DepthModelAbsolute(data_dir, path_to_video, cfg)
+    depth_model = DepthModelAbsolute(data_dir, path_to_video)
     geo_model = GeometricModel(depth_model)
     # is_calibrated = False
     text_color = (255, 255, 255)
@@ -198,9 +198,9 @@ def run(
             geo_model.set_normalization_axes(center_x, center_y)
 
         # TODO(SAID): run for only X frames, testing
-        # if is_calibrated and frame_count == 500:
-        #     print("Stopping after 500 frames for testing purposes.")
-        #     break
+        if frame_count == 200:
+            print("Stopping after 200 frames for testing purposes.")
+            break
 
         if not ret:
             print("No more frames to read.")
@@ -446,56 +446,58 @@ def run(
                 logging.info(
                     json.dumps(dict(frameId=frame_count, avgSpeedAway=avg_speed))
                 )
-    speed_estimation_end_time = time.time()
-    ############################
-    # output text on video stream
-    ############################
-    # TODO(SAID): remove debug
-    if frame_count % 10 == 0:
-        print(f"submodule times for frame {frame_count}:")
-        print(
-            f"  - car detection: {car_detection_end_time - car_detection_start_time:.2f}s"
-        )
-        print(f"  - tracking: {tracking_end_time - tracking_start_time:.2f}s")
-        print(
-            f"  - speed estimation: {speed_estimation_end_time - speed_estimation_start_time:.2f}s"
-        )
-        print(f"  - total: {time.time() - frame_start_time:.2f}s")
+        speed_estimation_end_time = time.time()
+        ############################
+        # output text on video stream
+        ############################
+        # TODO(SAID): remove debug
+        if frame_count % 10 == 0:
+            print(f"submodule times for frame {frame_count}:")
+            print(
+                f"  - car detection: {car_detection_end_time - car_detection_start_time:.2f}s"
+            )
+            print(f"  - tracking: {tracking_end_time - tracking_start_time:.2f}s")
+            print(
+                f"  - speed estimation: {speed_estimation_end_time - speed_estimation_start_time:.2f}s"
+            )
+            print(f"  - total: {time.time() - frame_start_time:.2f}s")
 
-    timestamp = frame_count / fps
-    if DEBUG_MODE:
-        cv2.putText(
-            frame,
-            f"Timestamp: {timestamp :.2f} s",
-            (7, 70),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            1,
-            text_color,
-            2,
-        )
-        cv2.putText(
-            frame,
-            f"FPS: {fps}",
-            (7, 100),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            1,
-            text_color,
-            2,
-        )
+        timestamp = frame_count / fps
+        if DEBUG_MODE:
+            cv2.putText(
+                frame,
+                f"Timestamp: {timestamp :.2f} s",
+                (7, 70),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                1,
+                text_color,
+                2,
+            )
+            cv2.putText(
+                frame,
+                f"FPS: {fps}",
+                (7, 100),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                1,
+                text_color,
+                2,
+            )
 
-        cv2.imwrite(
-            f"speed_estimation/frames_detected/frame_after_detection_{frame_count}.jpg",
-            frame,
-        )
+            cv2.imwrite(
+                f"speed_estimation/frames_detected/frame_after_detection_{frame_count}.jpg",
+                frame,
+            )
 
-    if frame_count % 50 == 0:
-        print(f"Frame no. {frame_count} time since start: {(time.time() - start):.2f}s")
-    frame_count += 1
-    # if max_frames != 0 and frame_count >= max_frames:
-    #     if not is_calibrated:
-    #         log_name = ""
-    #     print("Max frames reached, stopping speed estimation.")
-    #     break
+        if frame_count % 50 == 0:
+            print(
+                f"Frame no. {frame_count} time since start: {(time.time() - start):.2f}s"
+            )
+        frame_count += 1
+        # if max_frames != 0 and frame_count >= max_frames:
+        #     if not is_calibrated:
+        #         log_name = ""
+        #     print("Max frames reached, stopping speed estimation.")
+        #     break
 
     input_video.release()
     cv2.destroyAllWindows()

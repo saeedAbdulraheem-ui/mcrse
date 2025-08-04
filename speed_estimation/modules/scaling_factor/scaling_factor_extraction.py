@@ -6,6 +6,7 @@ from speed_estimation.modules.depth_map.depth_map_utils import DepthModel
 from numpy.typing import NDArray
 from scipy.linalg import norm
 from scipy.spatial import distance
+import cv2
 from speed_estimation.utils.speed_estimation import (
     Line,
     Point,
@@ -188,7 +189,7 @@ class GeometricModel:
         )
 
     def get_scaled_distance_from_camera_points(
-        self, cp1: CameraPoint, cp2: CameraPoint
+        self, frame, cp1: CameraPoint, cp2: CameraPoint
     ) -> float:
         """Get the scaled distance between two two-dimensional CameraPoints in meters.
 
@@ -199,7 +200,7 @@ class GeometricModel:
         @return:
             Returns the scaled distance between those CameraPoints in meters.
         """
-        return self.__get_scaled_distance_from_camera_points(cp1, cp2)
+        return self.__get_scaled_distance_from_camera_points(frame, cp1, cp2)
 
     def __get_unscaled_world_point(self, frame, cp: CameraPoint) -> WorldPoint:
         normalised_u = self.scaling_x * (cp.x_coord - self.center_x)
@@ -390,10 +391,10 @@ class GeometricModel:
         )
 
     def __get_scaled_distance_from_camera_points(
-        self, cp1: CameraPoint, cp2: CameraPoint
+        self, frame, cp1: CameraPoint, cp2: CameraPoint
     ):
-        scaled_wp1 = self.__get_scaled_world_point(cp1)
-        scaled_wp2 = self.__get_scaled_world_point(cp2)
+        scaled_wp1 = self.__get_scaled_world_point(frame, cp1)
+        scaled_wp2 = self.__get_scaled_world_point(frame, cp2)
         return self.__calculate_distance_between_world_points(scaled_wp1, scaled_wp2)
 
 
