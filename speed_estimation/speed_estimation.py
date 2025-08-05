@@ -64,10 +64,10 @@ config.read("speed_estimation/config.ini")
 
 
 MAX_TRACKING_MATCH_DISTANCE = config.getint("tracker", "max_match_distance")
-PED_CLASS_ID = config.getint("tracker", "ped_class_id")
-CYCLE_CLASS_ID = config.getint("tracker", "cycle_class_id")
+# PED_CLASS_ID = config.getint("tracker", "ped_class_id")
+# CYCLE_CLASS_ID = config.getint("tracker", "cycle_class_id")
 CAR_CLASS_ID = config.getint("tracker", "car_class_id")
-MOTORBIKE_CLASS_ID = config.getint("tracker", "motorbike_class_id")
+# MOTORBIKE_CLASS_ID = config.getint("tracker", "motorbike_class_id")
 NUM_TRACKED_CARS = config.getint("calibration", "num_tracked_cars")
 NUM_GT_EVENTS = config.getint("calibration", "num_gt_events")
 AVG_FRAME_COUNT = config.getfloat("analyzer", "avg_frame_count")
@@ -218,10 +218,11 @@ def run(
                 [boxes[i], class_ids[i]]
                 for i, class_id in enumerate(class_ids)
                 if (
-                    class_id == CAR_CLASS_ID
-                    or class_id == PED_CLASS_ID
-                    or class_id == CYCLE_CLASS_ID
-                    or class_id == MOTORBIKE_CLASS_ID
+                    class_id
+                    == CAR_CLASS_ID
+                    # or class_id == PED_CLASS_ID
+                    # or class_id == CYCLE_CLASS_ID
+                    # or class_id == MOTORBIKE_CLASS_ID
                 )
                 and scores[i] >= OBJECT_DETECTION_MIN_CONFIDENCE_SCORE
             ]
