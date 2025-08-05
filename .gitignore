@@ -150,3 +150,9 @@ speed_estimation/modules/depth_map/PixelFormer/pixelformer
 
 *.mp4
 *.jpg
+
+outputs
+ocsort
+datasets/raw_dat
+speed_estimation/modules/depth_map/Unidepth/
+speed_estimation/modules/depth_map/FlashDepth/

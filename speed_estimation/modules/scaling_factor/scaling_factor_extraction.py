@@ -2,21 +2,28 @@ from dataclasses import dataclass
 from typing import Dict, List, NamedTuple, Tuple
 
 import numpy as np
-from modules.depth_map.depth_map_utils import DepthModel
+from speed_estimation.modules.depth_map.depth_map_utils import DepthModel
 from numpy.typing import NDArray
 from scipy.linalg import norm
 from scipy.spatial import distance
-from utils.speed_estimation import Line, Point, TrackingBox, get_intersection
+from speed_estimation.utils.speed_estimation import (
+    Line,
+    Point,
+    TrackingBox,
+    get_intersection,
+)
 
 # Mapping from YOLO class IDs to average object lengths in meters
 # Mapping from YOLOv4 class IDs to average horizontal object lengths in meters
 # (indices based on YOLOv4: 0=person, 1=bicycle, 2=car, 3=motorbike)
 YOLO_CLASS_ID_TO_AVG_LENGTH = {
-    0: 0.5,   # person (average horizontal width)
-    1: 1.7,   # bicycle (horizontal length)
-    2: 6.0,   # car (horizontal length)
-    3: 2.1,   # motorbike (horizontal length)
+    0: 0.5,  # person (average horizontal width)
+    1: 1.7,  # bicycle (horizontal length)
+    2: 6.0,  # car (horizontal length)
+    3: 2.1,  # motorbike (horizontal length)
 }
+
+
 @dataclass
 class CameraPoint:
     """A Camera Point in the frame.
@@ -335,7 +342,7 @@ def __online_scaling_factor_estimation_from_least_squares(stream_of_events):
 
 
 def get_ground_truth_events(
-    tracking_boxes: Dict[int, List[TrackingBox]]
+    tracking_boxes: Dict[int, List[TrackingBox]],
 ) -> List[GroundTruthEvent]:
     """Get ground truth events to calculate the scaling factor.
 

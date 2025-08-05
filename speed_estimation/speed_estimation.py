@@ -39,29 +39,28 @@ import cv2
 import torch
 from tqdm import tqdm
 
-from get_fps import get_fps
-from modules.depth_map.depth_map_utils import DepthModel
-from modules.object_detection.yolov4.object_detection import (
+from speed_estimation.modules.depth_map.depth_map_utils import DepthModel
+from speed_estimation.modules.object_detection.yolov4.object_detection import (
     ObjectDetection as ObjectDetectionYoloV4,
 )
-from modules.scaling_factor.scaling_factor_extraction import (
+from speed_estimation.modules.scaling_factor.scaling_factor_extraction import (
     GeometricModel,
     CameraPoint,
     get_ground_truth_events,
     offline_scaling_factor_estimation_from_least_squares,
 )
-from modules.shake_detection.shake_detection import ShakeDetection
-from paths import SESSION_PATH, VIDEO_NAME
-from utils.speed_estimation import (
+from speed_estimation.modules.shake_detection.shake_detection import ShakeDetection
+from speed_estimation.paths import SESSION_PATH, VIDEO_NAME
+from speed_estimation.utils.speed_estimation import (
     Direction,
     TrackingBox,
     Car,
     calculate_car_direction,
 )
-from modules.evaluation.evaluate import plot_absolute_error
+from speed_estimation.modules.evaluation.evaluate import plot_absolute_error
 
 config = configparser.ConfigParser()
-config.read("config.ini")
+config.read("speed_estimation/config.ini")
 
 
 MAX_TRACKING_MATCH_DISTANCE = config.getint("tracker", "max_match_distance")
@@ -148,8 +147,6 @@ def run(
 
     input_video = cv2.VideoCapture(path_to_video)
 
-    fps = get_fps(path_to_video) if fps == 0 else fps
-
     sliding_window = SLIDING_WINDOW_SEC * fps
 
     # Initialize running variables
@@ -195,6 +192,10 @@ def run(
         if not ret:
             break
 
+        # if is_calibrated and frame_count == 200:
+        #     print("Stopping after 200 frames for testing purposes.")
+        #     break
+
         # for shake_detection
         if shake_detection.is_hard_move(frame):
             logging.info(
@@ -214,8 +215,7 @@ def run(
             (class_ids, scores, boxes) = object_detection.detect(frame)
 
             boxes = [
-                [boxes[i],
-                class_ids[i]]
+                [boxes[i], class_ids[i]]
                 for i, class_id in enumerate(class_ids)
                 if (
                     class_id == CAR_CLASS_ID
@@ -236,7 +236,14 @@ def run(
 
             tracking_boxes_cur_frame.append(
                 TrackingBox(
-                    center_x, center_y, x_coord, y_coord, width, height, frame_count, class_id
+                    center_x,
+                    center_y,
+                    x_coord,
+                    y_coord,
+                    width,
+                    height,
+                    frame_count,
+                    class_id,
                 )
             )
 
@@ -326,8 +333,12 @@ def run(
                     tracked_cars[object_id].frame_end += 1
                 else:
                     tracked_cars[object_id] = Car(
-                        [tracking_box], 1, frame_count, frame_count, 
-                        Direction.UNDEFINED, 0.0
+                        [tracking_box],
+                        1,
+                        frame_count,
+                        frame_count,
+                        Direction.UNDEFINED,
+                        0.0,
                     )
                 cv2.putText(
                     frame,
@@ -345,7 +356,7 @@ def run(
             ############################
             # speed estimation
             ############################
-            if frame_count >= fps:# and frame_count % sliding_window == 0:
+            if frame_count >= fps:  # and frame_count % sliding_window == 0:
                 # every x seconds
                 car_count_towards = 0
                 car_count_away = 0
@@ -393,7 +404,9 @@ def run(
                                     AVG_FRAME_COUNT / int(car.frames_seen)
                                 ) * SPEED_LIMIT
                             # Write car ID and estimated speed on the car
-                            speed_kmh = round((meters_moved / (car.frames_seen / fps)) * 3.6, 2)
+                            speed_kmh = round(
+                                (meters_moved / (car.frames_seen / fps)) * 3.6, 2
+                            )
                             # print(f"obj ID {car_id}, speed {speed_kmh} km/h")
                             car.speed = speed_kmh
                     else:
@@ -495,7 +508,7 @@ def main(session_path_local: str, path_to_video: str, enable_visual: bool):
         print("Calibration did not finish, skip evaluation.")
     else:
         # Evaluation
-        plot_absolute_error([log_name], "logs/", "gt_logs")
+        plot_absolute_error([log_name], "logs/", "speed_estimation/gt_logs")
         print("Put your evaluation here.")
 
 

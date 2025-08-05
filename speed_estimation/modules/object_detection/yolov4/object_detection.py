@@ -2,7 +2,7 @@ from typing import List, Tuple
 
 import cv2
 import numpy as np
-from paths import YOLOV4_WEIGHTS, YOLOV4_CLASSES, YOLOV4_CONFIG
+from speed_estimation.paths import YOLOV4_WEIGHTS, YOLOV4_CLASSES, YOLOV4_CONFIG
 
 
 class ObjectDetection:
