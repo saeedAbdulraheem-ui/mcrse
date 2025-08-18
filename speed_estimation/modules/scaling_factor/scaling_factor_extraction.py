@@ -6,6 +6,8 @@ from speed_estimation.modules.depth_map.depth_map_utils import DepthModel
 from numpy.typing import NDArray
 from scipy.linalg import norm
 from scipy.spatial import distance
+
+import cv2
 from speed_estimation.utils.speed_estimation import (
     Line,
     Point,
@@ -19,7 +21,7 @@ from speed_estimation.utils.speed_estimation import (
 YOLO_CLASS_ID_TO_AVG_LENGTH = {
     0: 0.5,  # person (average horizontal width)
     # 1: 1.7,  # bicycle (horizontal length)
-    2: 5.5,  # car (horizontal length)
+    2: 4.5,  # car (horizontal length)
     # 3: 2.1,  # motorbike (horizontal length)
 }
 
@@ -215,7 +217,37 @@ class GeometricModel:
             raise ValueError(f"Depth model returned None for frame {cp.frame}")
         depth_map = result[0] if isinstance(result, tuple) else result
         np_depth_map = np.array(depth_map)
-        unscaled_depth: float = np_depth_map[cp.y_coord, cp.x_coord]
+
+        # Write the depth map to disk for debugging
+
+        # Apply colormap to the depth map for visualization
+        # debug_depth_img_color = cv2.applyColorMap(np_depth_map, cv2.COLORMAP_JET)
+        # # Split the image vertically and take the right half
+        # h, w = debug_depth_img_color.shape[:2]
+        # debug_depth_img_color = debug_depth_img_color[:, w // 2 :]
+
+        # cv2.imwrite(
+        #     f"speed_estimation/debug/unscaled_depth_frame_{cp.frame}.png",
+        #     debug_depth_img_color,
+        # )
+        h, w = np_depth_map.shape[:2]
+        sliced_depth_map = np_depth_map[:, w // 2 :]
+
+        # Resize to match frame shape
+        np_depth_map_resized = cv2.resize(
+            sliced_depth_map,
+            (frame.shape[1], frame.shape[0]),
+            interpolation=cv2.INTER_NEAREST,
+        )
+
+        y, x = cp.y_coord, cp.x_coord
+        h, w, _ = np_depth_map.shape
+        y_min = max(0, y - 3)
+        y_max = min(h, y + 3)
+        x_min = max(0, x - 3)
+        x_max = min(w, x + 3)
+        window = np_depth_map_resized[y_min:y_max, x_min:x_max]
+        unscaled_depth: float = float(np.mean(window))
 
         # we also mirror theta around pi and phi around 0
         theta = np.pi - theta
