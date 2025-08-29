@@ -1,6 +1,8 @@
-# A Self-Calibrating End-to-End Pipeline for Real-Time Speed Estimation for Traffic Monitoring
+# MC-RMSE Monocular Camera Real-time Metric Speed Estimation
 
-### This repository provides an easy way of estimating the speed of traffic leveraging uncalibrated video footage.
+### This repository provides an easy way of estimating the speed of traffic using video footage
+
+## acknowledgement: thanks to the authors of FARSEC for providing the base framework: https://arxiv.org/html/2309.14468
 
 ## Structure
 The project is split into multiple modules, each handling a part of the total pipeline.
@@ -12,45 +14,20 @@ Currently, there are:
 
 | Module Name                     | Folder                   | Description                                                                                                                                                           |
 |---------------------------------|--------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Depth map                       | modules/depth_map        | Generates a depth map for a provided frame, using a customized version of the [Pixelformer](https://github.com/ashutosh1807/PixelFormer).                             |
-| Evaluation                      | modules/evaluation       | Compares videos with the provided ground truth on the BrnoCompSpeed Dataset.                                                                                          |
-| Car Tracking                    | modules/object_detection | Detecting cars in a video frame by with a YOLOv4 model. If you want to use your own model, place it in the folder `modules/object_detection/custom_object_detection`. |
+| Depth map                       | modules/depth_map        | Generates a depth map for a provided frame, either utilizes UniDepthV2 https://github.com/lpiccinelli-eth/UniDepth for metric depth estimation (requires no calibration). Or uses FlashDepth for temporally-coherent depth estimation and would provide better results if calibration parameters to be set in modules/scaling_factor_estimation
+|
+| Evaluation                      | modules/evaluation       | Compares videos with the provided ground truth on the kitti-raw Dataset.                                                                                          |
+| Car Tracking                    | modules/object_detection | Detecting cars in a video frame by with a YOLOv4 model. Newer models may be used as well with minor modifications in `modules/speed_estimation.py`
+
 | Calibration                     | modules/scaling_factor   | Automatically calibrates the pipeline at start and derives a scaling factor.                                                                                          |
 | Shake Detection                 | modules/shake_detection  | Detects if the camera perspective changed. If so a recalibration is required.                                                                                         |
 | Stream-Conversion & Downsampler | modules/streaming        | Reads a stream, caps it to 30 FPS and provides the frames.                                                                                                            |
 
 ## Setup
 
-Running the code can be done in two ways:
+to run the code, a docker image setup is preffered, however, the instructions can also be run to setup the environment locally
 
-1. Locally
-2. Docker (with and without CUDA support)
-
-### Local Setup
-
-0. (Have python virtual environments set up, e.g. through `conda`)
-1. Install requirements from `environment.yml` or if you are using macOS from `environment_mac.yml`:\
-`conda env create -f environment.yml`
-2. `conda activate farsec`
-3. Install [ffmpeg](https://ffmpeg.org/) for your machine.
-
-```sh
-# Mac
-> brew install ffmpeg
-# Ubuntu / Debian
-> sudo apt install ffmpeg (if it does not work run this command: sudo apt-get clean ; sudo apt-get update ; sudo apt-get check ; sudo apt-get purge ffmpeg* -y ; sudo apt-get autoremove -y ; sudo apt-get -f satisfy ffmpeg -y)
-```
-4. `cd scripts/`
-5. Run `/bin/bash customize_pixelformer.sh`. With this command the [Pixelformer](https://github.com/ashutosh1807/PixelFormer) repository will be cloned into the correct folder hierarchy. It additionally customizes the code, so that it fits into our pipeline.
-6. If you want to clean up the customization scripts used in step 5, run `/bin/bash cleanup.sh`. This step is not mandatory. 
-7. Download the weights for the depth map from
-   here: https://drive.google.com/file/d/1s7AdfwrV_6-svzfntBJih011u2IGkjf4/view?usp=share_link
-8. Place the weights in that folder: `speed_estimation/modules/depth_map/PixelFormer/pretrained`
-9. Download the YoloV4 weights from here: https://github.com/AlexeyAB/darknet/releases/download/darknet_yolo_v3_optimal/yolov4.weights
-10. Place the weights in that folder: `speed_estimation/model_weights/`
-11. Update the paths in `speed_estimation/paths.py` (detailed information in Section Configuration).
-12. Activate the pre-commit hook: `pre-commit install` (the hook will then be installed in this directory `.git/hooks/pre-commit`)
-
+ 
 ### Docker Setup
 
 #### Without CUDA
