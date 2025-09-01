@@ -15,11 +15,11 @@ The relevant modules are:
 
 | Module Name                     | Folder                   | Description                                                                                                                                                           |
 |---------------------------------|--------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Depth map                       | modules/depth_map        | Generates a depth map for a provided frame, either utilizes UniDepthV2 https://github.com/lpiccinelli-eth/UniDepth for metric depth estimation (requires no calibration). Or uses FlashDepth for temporally-coherent depth estimation and would provide better results if calibration parameters to be set in modules/scaling_factor_estimation
-|
-| Evaluation                      | modules/evaluation       | Compares videos with the provided ground truth on the kitti-raw Dataset.                                                                                          |
-| Car Tracking                    | modules/object_detection | Detecting cars in a video frame by with a YOLOv4 model. Newer models may be used as well with minor modifications in `modules/speed_estimation.py`
-
+| Depth map                       | modules/depth_map        | Generates a depth map for a provided frame, either utilizes UniDepthV2 https://github.com/lpiccinelli-eth/UniDepth for metric depth estimation                        |
+| (requires no calibration). Or | uses FlashDepth for temporally-coherent depth estimation and would provide better results if calibration parameters to be set in modules/scaling_factor_estimation. For Flashdepth you must setup  |
+| submodule, to do so follow the instructions found in https://github.com/Eyeline-Labs/FlashDepth/tree/main                                                                                                                          |
+| Evaluation                      | modules/evaluation       | Compares videos with the provided ground truth on the kitti-raw Dataset.                                                                                              |
+| Car Tracking                    | modules/object_detection | Detecting cars in a video frame by with a YOLOv4 model. Newer models may be used as well with minor modifications in `modules/speed_estimation.py`                    |
 | Calibration                     | modules/scaling_factor   | Automatically calibrates the pipeline at start and derives a scaling factor.                                                                                          |
 | Shake Detection                 | modules/shake_detection  | Detects if the camera perspective changed. If so a recalibration is required.                                                                                         |
 | Stream-Conversion & Downsampler | modules/streaming        | Reads a stream, caps it to 30 FPS and provides the frames.                                                                                                            |
@@ -31,36 +31,14 @@ to run the code, a docker image setup is preffered, however, the instructions ca
  
 ### Docker Setup
 
-#### Without CUDA
-0. (Have `docker` installed)
-1. Go through steps 4. - 11. from the [local setup](#local-setup), to prepare the repository which will later be mounted into the docker container.
-2. Go to `docker` directory in a terminal.
-3. `docker build -t farsec:latest .`
-4. Start the docker container with following command: (note that in this case the paths configured in speed_estimation/paths.py will be considered. If you want you can also pass the correct paths as arguments, as described [here](#run))
-
-```
-docker run --rm -v $PATH_TO_REPO:/storage -v \
--t farsec:latest python3 /storage/speed_estimation/speed_estimation.py
-```
-
 #### With CUDA
-**Note: We used this setup on an Nvidia GeForce RTX 3090 with Cuda 11.4. It can happen that this setup needs some modifications to fit your individual setup.**
-
+**Note: We used this setup on an Nvidia GeForce RTX 4050 with Cuda 11.4. It can happen that this setup needs some modifications to fit your individual setup.**
+-1. for Flashdepth usage, setup the Flashdepth model first by following the link: https://github.com/Eyeline-Labs/FlashDepth/tree/main  
 0. (Have `docker` installed)
-1. Go through steps 4. - 11. from the [local setup](#local-setup), to prepare the repository which will later be mounted into the docker container.
 2. Go to `docker/cuda` directory in a terminal.
 3. Run `docker build .` Assign a tag, if you like.
-4. Run the docker container with the following command:
-
-```
-docker run --rm \
-        --gpus '"device=0"' -v $PATH_TO_REPO:/storage -v $PATH_TO_VIDEO_ROOT_FOLDER:/scratch2 \
-        -t cv-cuda python3 /storage/speed_estimation/speed_estimation.py \
-        "$PATH_TO_SESSION_DIRECTORY" "$PATH_TO_VIDEO_FILE_IN_DOCKER"
-```
-
-Replace `$PATH_TO_REPO`, `$PATH_TO_VIDEO_ROOT_FOLDER, "$PATH_TO_SESSION_DIRECTORY"` and `$PATH_TO_VIDEO_FILE_IN_DOCKER` with the paths on your
-machine.
+4. Run the docker container with the following command: ./run_docker.sh, however, modify the paths in the script to match the local ones.
+5. to run the speed estimation pipeline, use the command ./run_estimation.sh, the same as the above, modify the paths first
 
 **Note: This repository has a default configuration (`speed_estimation/config.ini`) that can be adjusted if necessary (see Section [Configuration](#configuration)).**
 
@@ -75,38 +53,14 @@ This project comes with a default configuration, which can be adjusted. To do so
 | sliding_window_sec                 | Seconds to use for the sliding window, in which the speed es estimated.                                                                                                     | integer |
 | num_tracked_cars                   | Number of cars the pipeline should use to calibrate itself.                                                                                                                 | integer |
 | num_gt_events                      | Number of ground truth events the pipeline should use to calibrate itself.                                                                                                  | integer |
-| car_class_id                       | The class the detection model uses to identify a vehicle.                                                                                                                   | integer |
+| ped_class_id                       | The class the detection model uses to identify a person.                                                                                                                    | integer |
+| car_class_id                       | The class the detection model uses to identify a car.                                                                                                                       | integer |
+| cycle_class_id                     | The class the detection model uses to identify a cycler.                                                                                                                    | integer |
+| motorbike_class_id                 | The class the detection model uses to identify a motorbike.                                                                                                                 | integer |
 | max_match_distance                 | Maximum distance for that bounding boxes are accepted (from the closest bounding box).                                                                                      | integer |
-| object_detection_min_confidence_score | The minimum allowed score with which the model should recognize a vehicle.                                                                                                  | float  |
+| object_detection_min_confidence_score | The minimum allowed score with which the model should recognize a vehicle.                                                                                                | float  |
 | speed_limit                        | Speed limit on the road segment shown in the video (in km/h).                                                                                                               | integer |  
 | avg_frame_count                    | Output of meta statistics approach gets written here. Average frames a standard car was taking to drive through the CCTV segment (average tracked over a longer time frame). | float  |
-| use_cpu                            | Wether the CPU should be used or not. If set to false the GPU will be used.                                                                                                 | integer |
-
-The default configuration in `speed_estimation/config.ini` matches the demo video we have linked in Section [Dataset](#dataset). If you are using the BrnoCompSpeed dataset and wanna reproduce our results, you can use the configuration we have used:
-
-```
-[main]
-fps = 50
-custom_object_detection = False
-sliding_window_sec = 60
-
-[calibration]
-num_tracked_cars = 400
-num_gt_events = 50
-
-[tracker]
-car_class_id = 2
-; Maximum distance for that bounding boxes are accepted (from the closest bounding box)
-max_match_distance = 50
-object_detection_min_confidence_score = 0.1
-
-[analyzer]
-speed_limit = 80
-avg_frame_count = 35.142857142857146
-
-[device]
-use_cpu = 0
-```
 
 
 Additionally, the `speed_estimation/paths.py` can be adjusted.
@@ -123,11 +77,7 @@ Additionally, the `speed_estimation/paths.py` can be adjusted.
 
 ## Dataset
 
-As a test dataset, we provide you a short video which can be downloaded [here](https://www.pexels.com/video/aerial-view-of-flow-of-traffic-in-the-highway-3078508/), rename it to `video.mp4` and placed in this directory: `datasets/`. This video is just to validate if the pipeline starts to run and your setup works fine.
-It is too short for a sophisticated calibration, so do not wonder if the speed estimates are not overly correct.
-
-As a sophisticated dataset, we utilized the Brno CompSpeed dataset, which provides ground truth information for each car. We used this dataset to evaluate the performance of our pipeline.
-Please contact {isochor,herout,ijuranek}@fit.vutbr.cz (see https://github.com/JakubSochor/BrnoCompSpeed) to receive a download link for the dataset.
+we use the kitti raw dataset for evaluation, found in https://www.cvlibs.net/datasets/kitti/raw_data.php, for setting up the ground truth, and generating a stitched video to be used use the repo https://github.com/saeedAbdulraheem-ui/mcrse_preprocess_kitti
 
 **The pipline does also work with other videos and datasets, what means that you do not necessarily use the Brno CompSpeed dataset, but your own ones.**
 
