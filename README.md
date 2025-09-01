@@ -5,12 +5,13 @@
 ## acknowledgement: thanks to the authors of FARSEC for providing the base framework: https://arxiv.org/html/2309.14468
 
 ## Structure
-The project is split into multiple modules, each handling a part of the total pipeline.
+The project is split into multiple modules, each handling a part of the total pipeline, the flowchart of the full pipeline is shown below.
 
-<img src="images/pipeline.png"  width="40%">
+<img width="1153" height="214" alt="image" src="https://github.com/user-attachments/assets/27111f77-aaa0-49dd-a0cb-880dec86a034" />
+
 
 The different modules of this project can be found inside the folder *speed_estimation/modules*
-Currently, there are:
+The relevant modules are:
 
 | Module Name                     | Folder                   | Description                                                                                                                                                           |
 |---------------------------------|--------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------|
